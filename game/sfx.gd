@@ -109,8 +109,6 @@ static func bake_all(lexicon_seed: int) -> Dictionary:
 	var out := {}
 	for n in NAMES:
 		out[n] = named(n, P)
-	for id in ItemDB.all_ids():
-		out["item_" + id] = item_sound(id, P)
 	for c in range(1, 7):
 		out["syn_%d" % c] = synergy(c, P)
 	return out
@@ -328,7 +326,7 @@ static func fm(out: PackedFloat32Array, t0: float, fc: float, c: int, m: int, in
 
 ## Signature sound for one item, derived from its id (pitch, detail) and tags (timbre).
 static func item_sound(id: String, P: Dictionary) -> PackedFloat32Array:
-	var d := ItemDB.get_def(id)
+	var d: Dictionary = {}
 	var tags: Array = d.get("tags", [])
 	var h := hash_str(id)
 	var rng := RandomNumberGenerator.new()

@@ -406,7 +406,7 @@ func _beast_detail(d: Rect2, a: float) -> void:
 	var id := selected.trim_prefix("enemy:")
 	var info: Dictionary = Meta.bestiary.get(id, {})
 	var traits: Array = info.get("traits", [])
-	var def: Dictionary = EnemyDB.get_def(id)
+	var def: Dictionary = {}
 	var total: int = (def.get("traits", []) as Array).size()
 	var nm := Lexicon.display_name(selected)
 	UiKit.text(self, nm if nm != "" else "a creature of the unread tongue", d.position + Vector2(24, 40), 26, Color(UiKit.CREAM, a))
@@ -426,7 +426,7 @@ func _secret_detail(d: Rect2, a: float) -> void:
 	var known: bool = Meta.is_item_known(p[0]) or Lexicon.is_known("item:" + p[0])
 	var text := "A thing it does only in the right company. The word for it is still unread."
 	if known:
-		for s: Dictionary in ItemDB.secrets_of(p[0]):
+		for s: Dictionary in ([] as Array[Dictionary]):
 			if str(s.get("id", "")) == p[1]:
 				text = str(s.get("text", text))
 	UiKit.text(self, Lexicon.readable_name("item:" + p[0]) if known else "an unread thing", d.position + Vector2(24, 40), 26, Color(UiKit.CREAM, a))

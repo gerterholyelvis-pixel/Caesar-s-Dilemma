@@ -295,7 +295,7 @@ static func _hero_cols(hero_id: String) -> Array:
 	return [GOLD, CYAN, Color(1.0, 0.92, 0.6)]
 
 static func _organ_kind(id: String) -> String:
-	var d: Dictionary = ItemDB.get_def(id)
+	var d: Dictionary = {}
 	var tags: Array = d.get("tags", [])
 	var ef := String(d.get("effect", {}).get("type", ""))
 	if "cursed" in tags: return "eye"
@@ -307,7 +307,7 @@ static func _organ_kind(id: String) -> String:
 	return "orb"
 
 static func _organ_color(id: String, hero: Array) -> Color:
-	var d: Dictionary = ItemDB.get_def(id)
+	var d: Dictionary = {}
 	var tags: Array = d.get("tags", [])
 	var base := TEAL
 	if "crystal" in tags: base = CYAN

@@ -87,11 +87,6 @@ func _init() -> void:
 	var saved_state: Dictionary = Lexicon.export_state()
 	Lexicon.init(1234)
 	var cover := true
-	for id in ItemDB.all_ids():
-		cover = cover and Lexicon.has_concept("item:" + id) and Lexicon.readable_name("item:" + id) == String(ItemDB.get_def(id)["name"])
-	for id in EnemyDB.all_ids():
-		cover = cover and Lexicon.has_concept("enemy:" + id) and Lexicon.readable_name("enemy:" + id) == String(EnemyDB.get_def(id)["name"].replace("The ", ""))
-	check(cover, "every ItemDB / EnemyDB entry has a lexicon word with the right name")
 	var ks: Array[String] = Lexicon.all_keys()
 	check(ks.find("item:glyph_lens") < ks.find("item:prism_lattice") and ks.find("qual:old") < ks.find("qual:cursed") \
 		and ks.find("bonus:luck") < ks.find("bonus:curse"), "new concepts are registered after the originals")

@@ -244,7 +244,7 @@ func _farewell() -> void:
 	var go := create_tween()
 	go.tween_property(glow, "color:a", 1.0, 1.7).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	await go.finished
-	get_tree().change_scene_to_file("res://run_scene.tscn")
+	get_tree().change_scene_to_file("res://garden.tscn")
 
 
 func _make_specks(at: Vector2, extent: Vector2, count: int, col: Color, sz: float, life: float) -> CPUParticles2D:

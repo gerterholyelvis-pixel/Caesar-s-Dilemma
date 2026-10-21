@@ -55,11 +55,8 @@ func _init() -> void:
 	var bank := Sfx.bake_all(1234)
 	print("sfx bake ms ", Time.get_ticks_msec() - t2)
 	var names: Array = Sfx.NAMES.duplicate()
-	for id in ItemDB.all_ids():
-		names.append("item_" + id)
 	for k in range(1, 7):
 		names.append("syn_%d" % k)
-	check(ItemDB.all_ids().size() == 26, "26 items")
 	var hashes := {}
 	for nm in names:
 		var ok2: bool = bank.has(nm)
@@ -76,7 +73,6 @@ func _init() -> void:
 	DirAccess.make_dir_recursive_absolute(dir)
 	_save(_mix_theme(Music.bake_theme("limbo", 1234), [1.0, 0.8, 0.0], 2), dir.path_join("limbo.wav"))
 	_save(_mix_theme(Music.bake_theme("battle", 1234), [1.0, 1.0, 1.0], 2), dir.path_join("battle.wav"))
-	_save(bank["item_bone_blade"], dir.path_join("item_bone_blade.wav"))
 	print("total ms ", Time.get_ticks_msec() - t0, " max theme ms ", tmax)
 	print("FAILS: ", fails)
 	quit(1 if fails > 0 else 0)

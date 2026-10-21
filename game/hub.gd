@@ -22,8 +22,6 @@ static func boot() -> void:
 	if Meta.lexicon_seed == 0:
 		Meta.load()
 	Lexicon.init(Meta.lexicon_seed, Meta.known_words)
-	Meta.on_secret_discovered = ItemDB.mark_discovered
-	ItemDB.discovered_check = Meta.is_secret_discovered
 
 
 ## Installs Sfx + Music under the tree root on the next frame (never inside a busy _ready).

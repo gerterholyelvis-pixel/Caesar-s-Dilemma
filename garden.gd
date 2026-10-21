@@ -63,11 +63,14 @@ func _ready() -> void:
 	tw.tween_property(flash, "color:a", 0.0, 1.8).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	tw.tween_callback(flash.queue_free)
 
+	intro_finished.connect(_start_idle)
 	var args := OS.get_cmdline_user_args()
 	var fixed := -1.0
 	for a in args:
 		if a.begins_with("--cam="):
 			fixed = float(a.substr(6))
+	if "--autotap" in args:
+		fixed = 1.0
 	if "--title" in args:
 		cam = 1.0
 		_lock()
@@ -93,6 +96,10 @@ func _arrive() -> void:
 	title.fade_out()
 	_lock()
 	intro_finished.emit()
+
+
+func _start_idle() -> void:
+	add_child((load("res://idle/idle_game.tscn") as PackedScene).instantiate())
 
 
 # Freeze the world in place: the mouse no longer shifts the camera, so game objects can be placed

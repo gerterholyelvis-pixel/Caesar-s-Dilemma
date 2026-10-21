@@ -43,3 +43,17 @@ I0 strip the roguelike (agent), keep Limbo/garden/title and the reusable libs (g
 I1 core engine (BigNum, economy, save, offline, tests).  I2 UI framework + HUD.  I3 garden world view that grows with progress.
 I4 systems in parallel: generators+upgrades | research+glyph decoding | heroes | expeditions+events | crafting | prestige | collections+achievements.
 I5 audio + cinematic moments.  I6 balance by simulation.  I7 polish for beauty/clarity/60 fps.  Commit + push after each stage.
+
+## ADDED BY USER: CINEMATICS (Diablo-style) and CLICKER-HEROES-STYLE TAB UNLOCKS
+- TABS UNLOCK PROGRESSIVELY (like Clicker Heroes): a left/top tab rail starts nearly empty (Garden only). Each tab appears when a milestone is hit,
+  with a short flourish, and each one adds a new layer of intricacy: Garden -> Upgrades -> Research -> Heroes -> Expeditions -> Crafting -> Codex/Collections ->
+  Achievements -> Prestige (Limbo). Later tabs gain sub-tabs (e.g. Heroes: Seshat/Thoth/skills/relics). Every unlock is announced clearly and explains
+  itself in one line (clarity), while the glyph word for it is learned (mystery).
+- CINEMATICS (Diablo-style: dark, painterly, dramatic, slow camera, ominous/awe-inspiring sound design, sparse cryptic narration text, letterbox, big title cards):
+  chapter cinematics play at major beats and are skippable and replayable from the Collections tab. Planned moments: (1) the Awakening (first seed stirs, after the
+  title), (2) the First Sprout (the garden remembers), (3) Seshat arrives, (4) Thoth arrives, (5) the First Expedition departs, (6) the Waterfall awakens (a late
+  early-game set piece), (7) Prestige descent to Limbo with the angel (every layer escalates), (8) the Eclipse (second prestige), (9) a secret/ending cinematic.
+  Built with game/cutscene.gd + game/cinematics.gd: layered parallax shader scenes, fractal creatures (creature_art), particles, camera moves, procedural music
+  swells and sound design (just intonation/Euclidean rhythm directive), typography. HONEST LIMIT: these are real-time procedural cinematics, not pre-rendered
+  CGI like Blizzard's; we aim for their mood, pacing and drama within that.
+- Build order for these: tabs framework early (I2), cinematics shell hooked to unlock events (I2), actual cinematics one at a time (each verified by the user).
