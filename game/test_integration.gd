@@ -28,6 +28,7 @@ func _init() -> void:
 	test_secrets_and_meta()
 	test_lexicon()
 	test_dilemmas()
+	test_content_links()
 	test_random_fights()
 	DirAccess.remove_absolute("user://test_integration_meta.cfg")
 	print("RESULT " + ("ALL PASS" if fails == 0 else "FAILS: %d" % fails))
@@ -104,15 +105,15 @@ func test_pack_and_synergy() -> void:
 	check(bp.placed.size() == 6, "hand-picked pack placed (6 items)")
 	var blade: int = uid_of(bp, "bone_blade")
 	var eff: Dictionary = bp.effective_effect(blade)
-	check(int(eff["amount"]) == 10, "blade 6 +2 whetstone +2 hidden marrow = 10 (got %d)" % int(eff["amount"]))
+	check(int(eff["amount"]) == 9, "blade 5 +2 whetstone +2 hidden marrow = 9 (got %d)" % int(eff["amount"]))
 	var trig: Array = eff["secrets_triggered"]
 	check(trig.size() == 1 and String(trig[0]["secret_id"]) == "marrow", "marrow listed as triggered")
 	check(not bp.describe(blade).contains("Secret:"), "undiscovered secret hidden in tooltip")
 	check(bp.describe(blade).contains("more"), "tooltip hints there is more")
 	var sh: Dictionary = bp.effective_effect(uid_of(bp, "lapis_shield"))
-	check(int(sh["amount"]) == 7, "shield has a neighbour so bastion does not apply")
+	check(int(sh["amount"]) == 8, "shield has a neighbour so bastion does not apply")
 	var rt: Backpack = Backpack.from_dict(bp.to_dict())
-	check(rt.placed.size() == 6 and int(rt.effective_effect(uid_of(rt, "bone_blade"))["amount"]) == 10, "save/load roundtrip")
+	check(rt.placed.size() == 6 and int(rt.effective_effect(uid_of(rt, "bone_blade"))["amount"]) == 9, "save/load roundtrip")
 
 
 func test_full_fight_win() -> void:
@@ -195,7 +196,7 @@ func test_secrets_and_meta() -> void:
 	c3.start(bp2, ["spore_sprout"], {"hp": 40, "max_hp": 40}, rng)
 	c3.use(1)
 	check(secret_events.has("lapis_shield/bastion"), "when_alone secret fires in Combat")
-	check(int(bp2.effective_effect(1)["amount"]) == 11, "bastion gives 11 block alone")
+	check(int(bp2.effective_effect(1)["amount"]) == 12, "bastion gives 12 block alone")
 	var bp3 := Backpack.new()
 	bp3.place("crystal_bow", Vector2i(0, 0), 0)
 	bp3.place("sun_shard", Vector2i(1, 0), 0)
@@ -332,3 +333,36 @@ func test_random_fights() -> void:
 	check(long_fights == 0, "200 random fights: no infinite loops (max %d turns)" % max_turns)
 	check(wins + losses == 200, "every fight resolved (%d wins, %d losses)" % [wins, losses])
 	check(wins > 20 and losses > 0, "mix of outcomes is plausible")
+
+
+func test_content_links() -> void:
+	# cross-db references must resolve; new content must be reachable in play
+	var ok := true
+	for d: Dictionary in DilemmaDB.DILEMMAS:
+		for c: Dictionary in d["choices"]:
+			for e: Dictionary in c["effects"]:
+				if e["type"] == "item" and String(e.get("id", "")) != "":
+					ok = ok and not ItemDB.get_def(String(e["id"])).is_empty()
+	for id in EnemyDB.all_ids():
+		for ph in range(maxi((EnemyDB.get_def(id).get("phases", []) as Array).size(), 1)):
+			for it: Dictionary in EnemyDB.intents_for(id, ph):
+				if String(it.get("type", "")) == "split":
+					ok = ok and not EnemyDB.get_def(String(it.get("spawn", ""))).is_empty()
+	check(ok, "dilemma items and enemy spawns all resolve")
+	check(ItemDB.all_ids().size() == 26 and EnemyDB.all_ids().size() == 11 and DilemmaDB.DILEMMAS.size() >= 26, "26 items / 11 enemies / 26 dilemmas")
+	# a new-item pack fights an elite end to end
+	var bp := Backpack.new()
+	bp.w = 6
+	bp.h = 5
+	for pair in [["cursed_crown", Vector2i(0, 0)], ["echo_bell", Vector2i(3, 0)], ["hollow_idol", Vector2i(5, 0)], ["tide_flute", Vector2i(0, 3)]]:
+		bp.place(String(pair[0]), pair[1], 0)
+	var c := Combat.new()
+	var r := RandomNumberGenerator.new()
+	r.seed = 5
+	c.start(bp, ["prism_sentinel", "mire_leech"], {"hp": 60, "max_hp": 60, "floor": 4}, r)
+	var turns := 0
+	while not c.is_over() and turns < 60:
+		play_turn(c, r)
+		turns += 1
+		check(sane(c), "elite fight sane turn %d" % turns) if not sane(c) else null
+	check(c.is_over() and sane(c), "elite fight with new items resolves (%d turns, won=%s)" % [turns, str(c.won)])

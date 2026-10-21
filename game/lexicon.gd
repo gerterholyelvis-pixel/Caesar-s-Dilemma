@@ -222,3 +222,30 @@ static func _register_defaults() -> void:
 		"broken": "Broken", "whole": "Whole", "old": "Old"}
 	for id in quals:
 		register("qual:" + id, quals[id])
+	_register_expansion()
+
+
+## Appended AFTER the original concepts so existing profiles keep their glyph assignments.
+static func _register_expansion() -> void:
+	var items := {
+		"prism_lattice": "Prism Lattice", "mirror_shard": "Mirror Shard", "ember_censer": "Ember Censer",
+		"void_lantern": "Void Lantern", "tide_flute": "Tide Flute", "oath_stone": "Oath Stone",
+		"cursed_crown": "Cursed Crown", "hungry_maw": "Hungry Maw", "echo_bell": "Echo Bell",
+		"spiral_shell": "Spiral Shell", "hollow_idol": "Hollow Idol", "grafted_heart": "Grafted Heart"}
+	for id in items:
+		register("item:" + id, items[id], id in ["prism_lattice", "cursed_crown", "grafted_heart", "void_lantern", "hollow_idol"])
+	var enemies := {
+		"mire_leech": "Mire Leech", "ember_wisp": "Ember Wisp", "mirror_wraith": "Mirror Wraith",
+		"shard_hound": "Shard Hound", "prism_sentinel": "Prism Sentinel", "root_tyrant": "Root Tyrant"}
+	for id in enemies:
+		register("enemy:" + id, enemies[id], id in ["prism_sentinel", "root_tyrant"])
+	var bonuses := {
+		"curse": "Curse", "mirror": "Mirror", "void": "Void", "fractal": "Fractal",
+		"corner": "Corner", "diversity": "Many Kinds", "risk": "Risk", "pattern": "Pattern"}
+	for id in bonuses:
+		register("bonus:" + id, bonuses[id], id in ["diversity"])
+	var quals := {
+		"cursed": "Cursed", "hollow": "Hollow", "sharp": "Sharp", "late": "Late",
+		"twin": "Twin", "hungry": "Hungry", "fractal": "Fractal", "echoing": "Echoing"}
+	for id in quals:
+		register("qual:" + id, quals[id])

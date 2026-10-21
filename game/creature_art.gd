@@ -56,6 +56,9 @@ static func _branch(ci: CanvasItem, p: Vector2, ang: float, ln: float, depth: in
 	_branch(ci, e, ang + sway - spread, ln * 0.68, depth - 1, col, tip, t, w * 0.72)
 	_branch(ci, e, ang + sway + spread, ln * 0.68, depth - 1, col, tip, t, w * 0.72)
 
+static func _tri(ci: CanvasItem, a: Vector2, b: Vector2, d: Vector2, col: Color) -> void:
+	ci.draw_colored_polygon(PackedVector2Array([a, b, d]), col)
+
 static func _hash(s: String) -> int:
 	return absi(s.hash())
 
@@ -71,6 +74,12 @@ static func draw(ci: CanvasItem, kind: String, center: Vector2, size: float, t: 
 		"crystal_moth": _crystal_moth(ci, c, s, t)
 		"glass_golem": _glass_golem(ci, c, s, t)
 		"cascade_warden": _cascade_warden(ci, c, s, t)
+		"mire_leech": _mire_leech(ci, c, s, t)
+		"ember_wisp": _ember_wisp(ci, c, s, t)
+		"mirror_wraith": _mirror_wraith(ci, c, s, t)
+		"shard_hound": _shard_hound(ci, c, s, t)
+		"prism_sentinel": _prism_sentinel(ci, c, s, t)
+		"root_tyrant": _root_tyrant(ci, c, s, t)
 		_: _spore_sprout(ci, c, s, t)
 	_H = 0.0
 
@@ -289,6 +298,7 @@ static func _organ_kind(id: String) -> String:
 	var d: Dictionary = ItemDB.get_def(id)
 	var tags: Array = d.get("tags", [])
 	var ef := String(d.get("effect", {}).get("type", ""))
+	if "cursed" in tags: return "eye"
 	if "fractal" in tags: return "sprout"
 	if ef == "heal" or "bloom" in tags: return "bloom"
 	if ef == "energy" or "light" in tags: return "shard"
@@ -472,6 +482,14 @@ static func _organ(ci: CanvasItem, o: Dictionary, c: Vector2, r: float, t: float
 				_glow(ci, sp, r * 0.3, col, 0.6, 2)
 			ci.draw_arc(p, r * 0.95, 0, TAU, 20, _c(col, 0.35), 1.0, true)
 			ci.draw_circle(p, r * 0.25, _c(Color.WHITE, 0.9))
+		"eye":
+			ci.draw_circle(p, r * 0.8, _c(INK))
+			ci.draw_arc(p, r * 0.8, 0, TAU, 14, _c(col), 1.6, true)
+			for k in 6:
+				var a := TAU * k / 6.0 + t * 0.4 + ph
+				ci.draw_line(p + Vector2.from_angle(a) * r * 0.8, p + Vector2.from_angle(a) * r * 1.35, _c(hi, 0.85), 1.2, true)
+			ci.draw_circle(p, r * 0.32, _c(col.lightened(0.3)))
+			ci.draw_circle(p, r * 0.13, _c(INK))
 		"sprout":
 			_branch(ci, p, ang, r * 0.9, 3, col, hi, t + ph, maxf(1.5, r * 0.14))
 			ci.draw_circle(p, r * 0.22, _c(GOLD))
@@ -480,3 +498,176 @@ static func _organ(ci: CanvasItem, o: Dictionary, c: Vector2, r: float, t: float
 			ci.draw_arc(p, r * 0.7, 0, TAU, 14, _c(col), 1.6, true)
 			ci.draw_arc(p, r * 0.45, t + ph, t + ph + 4.0, 10, _c(hi, 0.8), 1.2, true)
 			ci.draw_circle(p, r * 0.18, _c(col.lightened(0.4)))
+
+
+# ------------------------------------------------------------------ v2 enemies
+static func _mire_leech(ci: CanvasItem, c: Vector2, s: float, t: float) -> void:
+	var base := c + Vector2(0, s * 0.15)
+	_glow(ci, base, s * 0.5, TEAL, 0.4)
+	var segs: Array[Vector2] = []
+	for i in 9:
+		var f := float(i) / 8.0
+		segs.append(base + Vector2(lerpf(-s * 0.4, s * 0.3, f), sin(f * 5.0 + t * 3.0) * s * 0.08 - sin(f * PI) * s * 0.12))
+	for i in 9:
+		var f := float(i) / 8.0
+		var r := s * (0.05 + 0.09 * sin(f * PI * 0.9 + 0.2))
+		ci.draw_circle(segs[i], r, _c(Color(0.04, 0.22, 0.24).lerp(Color(0.08, 0.4, 0.4), f)))
+		ci.draw_arc(segs[i], r, 0, TAU, 12, _c(TEAL, 0.7), 1.2, true)
+	# ringed mouth with siphon glow
+	var m := segs[8] + Vector2(s * 0.05, 0)
+	_glow(ci, m, s * 0.18, CYAN, 0.6, 3)
+	for k in 3:
+		ci.draw_arc(m, s * (0.12 - 0.03 * k), 0, TAU, 14, _c(GOLD if k == 1 else VIOLET, 0.9), 1.4, true)
+	ci.draw_circle(m, s * 0.025, _c(INK))
+	for i in 5:
+		var ph := fposmod(t * 0.7 + i * 0.2, 1.0)
+		ci.draw_circle(m + Vector2(s * 0.3 * ph, -s * 0.05 * ph), 1.5, _c(CYAN, 0.8 * ph))
+	_eye(ci, segs[6] + Vector2(0, -s * 0.07), s * 0.025, GOLD, t)
+
+static func _ember_wisp(ci: CanvasItem, c: Vector2, s: float, t: float) -> void:
+	var b := c + Vector2(0, sin(t * 2.5) * s * 0.05)
+	_glow(ci, b, s * 0.55, GOLD, 0.5, 5)
+	_glow(ci, b, s * 0.35, VIOLET, 0.35, 3)
+	var fl := PackedVector2Array()
+	for i in 20:
+		var a := TAU * i / 20.0
+		var tip := 1.0 + (0.9 * pow(maxf(0.0, -sin(a)), 3.0)) * (1.0 + 0.15 * sin(t * 6.0 + i))
+		fl.append(b + Vector2(cos(a) * s * 0.18, sin(a) * s * 0.2 * tip + (-s * 0.02 if sin(a) < 0 else 0.0)))
+	_pts(ci, fl, _c(Color(1.0, 0.55, 0.15, 0.9)), _c(GOLD, 0.95), 1.4)
+	var inner := PackedVector2Array()
+	for i in 14:
+		var a := TAU * i / 14.0
+		var tip := 1.0 + 0.7 * pow(maxf(0.0, -sin(a)), 3.0)
+		inner.append(b + Vector2(cos(a) * s * 0.09, sin(a) * s * 0.1 * tip))
+	ci.draw_colored_polygon(inner, _c(Color(1, 0.95, 0.7)))
+	# face-less glyph core (counted nested rings)
+	for k in 3:
+		ci.draw_arc(b + Vector2(0, s * 0.02), s * (0.12 - 0.03 * k), t * (1 + k) * 0.8, t * (1 + k) * 0.8 + 4.0, 10, _c(VIOLET, 0.9), 1.3, true)
+	for i in 5:
+		var ph := fposmod(t * 0.4 + i * 0.2, 1.0)
+		ci.draw_circle(b + Vector2(sin(i * 3.1 + t) * s * 0.15, -s * 0.2 - ph * s * 0.4), 1.5, _c(GOLD, 0.8 * (1.0 - ph)))
+
+static func _mirror_wraith(ci: CanvasItem, c: Vector2, s: float, t: float) -> void:
+	var b := c
+	_glow(ci, b, s * 0.55, Color(0.5, 0.8, 0.9), 0.35, 4)
+	var hood := PackedVector2Array([b + Vector2(-s * 0.3, s * 0.42), b + Vector2(-s * 0.2, -s * 0.1), b + Vector2(-s * 0.08, -s * 0.34), b + Vector2(s * 0.08, -s * 0.34), b + Vector2(s * 0.2, -s * 0.1), b + Vector2(s * 0.3, s * 0.42), b + Vector2(s * 0.12, s * 0.34), b + Vector2(0, s * 0.44), b + Vector2(-s * 0.12, s * 0.34)])
+	_pts(ci, hood, _c(Color(0.55, 0.72, 0.78, 0.85)), _c(Color(0.9, 1, 1), 0.95), 1.6)
+	# glass facets
+	for i in 4:
+		var x := -s * 0.15 + i * s * 0.1
+		ci.draw_line(b + Vector2(x, -s * 0.2 + (i % 2) * s * 0.1), b + Vector2(x * 1.6, s * 0.36), _c(Color.WHITE, 0.3), 1.0, true)
+	# reflected silhouette: a little dark figure inside the hood
+	var fy := b + Vector2(sin(t * 1.2) * s * 0.01, s * 0.05)
+	ci.draw_circle(fy + Vector2(0, -s * 0.12), s * 0.05, _c(INK, 0.9))
+	ci.draw_colored_polygon(PackedVector2Array([fy + Vector2(-s * 0.08, s * 0.2), fy + Vector2(0, -s * 0.06), fy + Vector2(s * 0.08, s * 0.2)]), _c(INK, 0.9))
+	_eye(ci, b + Vector2(-s * 0.05, -s * 0.15), s * 0.018, CYAN, t)
+	_eye(ci, b + Vector2(s * 0.05, -s * 0.15), s * 0.018, CYAN, t + 0.7)
+	# thorny reflections
+	for sd in [-1, 1]:
+		for k in 3:
+			var p := b + Vector2(float(sd) * s * (0.22 + 0.04 * k), -s * 0.05 + k * s * 0.13)
+			var a: float = (-PI * 0.5 + sd * (0.7 + 0.25 * k)) + sin(t + k) * 0.05
+			_pts(ci, PackedVector2Array([p + Vector2(0, -s * 0.03), p + Vector2.from_angle(a) * s * 0.2, p + Vector2(0, s * 0.03)]), _c(Color(0.7, 0.9, 1.0, 0.6)), _c(CYAN, 0.9), 1.0)
+	ci.draw_arc(b + Vector2(0, -s * 0.34), s * 0.1, PI * 1.1, PI * 1.9, 8, _c(GOLD, 0.9), 1.4, true)
+
+static func _shard_hound(ci: CanvasItem, c: Vector2, s: float, t: float) -> void:
+	var b := c + Vector2(0, s * 0.15)
+	_glow(ci, b, s * 0.55, CYAN, 0.35, 4)
+	var bob := sin(t * 3.0) * s * 0.01
+	# four legs
+	for i in 4:
+		var x := -s * 0.28 + i * s * 0.17 + (s * 0.04 if i > 1 else 0.0)
+		var sw := sin(t * 3.0 + i * 1.6) * s * 0.03
+		var f := b + Vector2(x, s * 0.05)
+		var p := f + Vector2(sw, s * 0.28)
+		ci.draw_line(f, p, _c(Color(0.12, 0.45, 0.55)), s * 0.045, true)
+		_tri(ci, p + Vector2(-s * 0.03, 0), p + Vector2(s * 0.05, 0), p + Vector2(s * 0.01, -s * 0.06), _c(CYAN, 0.9))
+	# body
+	var body := PackedVector2Array([b + Vector2(-s * 0.36, -s * 0.02 + bob), b + Vector2(-s * 0.2, -s * 0.14), b + Vector2(s * 0.15, -s * 0.12), b + Vector2(s * 0.34, -s * 0.04), b + Vector2(s * 0.3, s * 0.1), b + Vector2(-s * 0.3, s * 0.12)])
+	_pts(ci, body, _c(Color(0.05, 0.22, 0.3)), _c(CYAN, 0.9), 1.5)
+	# jagged shard fur (self-similar: each shard has a smaller one)
+	for i in 9:
+		var x := -s * 0.3 + i * s * 0.07
+		var h := s * (0.12 + 0.07 * ((i * 5) % 3)) * (1.0 + 0.1 * sin(t * 4.0 + i))
+		var bx := b + Vector2(x, -s * 0.13 + (s * 0.03 if i > 6 else 0.0))
+		_pts(ci, PackedVector2Array([bx + Vector2(-s * 0.03, 0), bx + Vector2(s * 0.01, -h), bx + Vector2(s * 0.035, 0)]), _c(CYAN.darkened(0.3), 0.85), _c(Color.WHITE, 0.8), 1.0)
+		_tri(ci, bx + Vector2(0, -h * 0.5), bx + Vector2(s * 0.03, -h * 0.65), bx + Vector2(0.0, -h * 0.9), _c(GOLD, 0.6))
+	# head
+	var h0 := b + Vector2(s * 0.36, -s * 0.06)
+	_pts(ci, PackedVector2Array([h0 + Vector2(-s * 0.06, -s * 0.1), h0 + Vector2(s * 0.2, -s * 0.02), h0 + Vector2(s * 0.2, s * 0.05), h0 + Vector2(-s * 0.02, s * 0.1)]), _c(Color(0.08, 0.35, 0.45)), _c(GOLD, 0.9), 1.4)
+	_tri(ci, h0 + Vector2(-s * 0.04, -s * 0.1), h0 + Vector2(s * 0.03, -s * 0.2), h0 + Vector2(s * 0.06, -s * 0.07), _c(CYAN))
+	_eye(ci, h0 + Vector2(s * 0.06, -s * 0.03), s * 0.025, GOLD, t)
+	# ringing arcs
+	for k in 3:
+		var ph := fposmod(t * 0.8 + k / 3.0, 1.0)
+		ci.draw_arc(h0 + Vector2(s * 0.1, 0), s * (0.1 + 0.3 * ph), -0.7, 0.7, 10, _c(CYAN, 0.6 * (1.0 - ph)), 1.3, true)
+
+static func _prism_sentinel(ci: CanvasItem, c: Vector2, s: float, t: float) -> void:
+	var b := c + Vector2(0, sin(t * 1.2) * s * 0.015)
+	_glow(ci, b, s * 0.7, VIOLET, 0.4, 5)
+	_glow(ci, b + Vector2(0, s * 0.3), s * 0.35, Color(0, 0, 0), 0.5, 3)
+	var cols := [CYAN, GOLD, VIOLET, MAGENTA, TEAL]
+	var rot := t * 0.5
+	var n := 5
+	# rotating faceted column: 5 faces as slivers across a hexagonal prism
+	for i in n:
+		var a0 := rot + TAU * i / n
+		var a1 := rot + TAU * (i + 1) / n
+		var x0 := sin(a0) * s * 0.2
+		var x1 := sin(a1) * s * 0.2
+		if cos(a0) + cos(a1) < -0.1:
+			continue
+		var vis := clampf((cos((a0 + a1) * 0.5) + 1.0) * 0.5, 0.25, 1.0)
+		var col: Color = cols[i]
+		var face := PackedVector2Array([b + Vector2(x0, -s * 0.3), b + Vector2(x1, -s * 0.3), b + Vector2(x1, s * 0.3), b + Vector2(x0, s * 0.3)])
+		ci.draw_colored_polygon(face, _c(col.darkened(0.4), 0.55 + 0.35 * vis))
+		ci.draw_polyline(face, _c(col.lightened(0.3), 0.9), 1.6, true)
+		# brittle seam
+		ci.draw_line(b + Vector2(lerpf(x0, x1, 0.3), -s * 0.3), b + Vector2(lerpf(x0, x1, 0.6), s * 0.05), _c(Color.WHITE, 0.6), 1.0, true)
+	# pyramid caps (menacing spires)
+	_pts(ci, PackedVector2Array([b + Vector2(-s * 0.2, -s * 0.3), b + Vector2(0, -s * 0.56), b + Vector2(s * 0.2, -s * 0.3)]), _c(CYAN.darkened(0.3), 0.9), _c(Color.WHITE, 0.95), 1.6)
+	_pts(ci, PackedVector2Array([b + Vector2(-s * 0.2, s * 0.3), b + Vector2(0, s * 0.52), b + Vector2(s * 0.2, s * 0.3)]), _c(VIOLET.darkened(0.3), 0.9), _c(GOLD, 0.95), 1.6)
+	# razor shards orbiting
+	for k in 6:
+		var a := t * 0.9 + k * TAU / 6.0
+		var p := b + Vector2(cos(a) * s * 0.42, sin(a) * s * 0.12 - s * 0.05 + (k % 2) * s * 0.1)
+		_tri(ci, p + Vector2(0, -s * 0.07), p + Vector2(s * 0.025, s * 0.03), p + Vector2(-s * 0.025, s * 0.03), _c(cols[k % 5], 0.9))
+	# single hard core + glare
+	_glow(ci, b + Vector2(0, -s * 0.05), s * 0.1, Color.WHITE, 0.9, 4)
+	ci.draw_circle(b + Vector2(0, -s * 0.05), s * 0.025, _c(Color.WHITE))
+	ci.draw_arc(b, s * 0.46, -0.4, 0.4 + sin(t) * 0.2, 12, _c(GOLD, 0.7), 1.5, true)
+
+static func _root_tyrant(ci: CanvasItem, c: Vector2, s: float, t: float) -> void:
+	var b := c + Vector2(0, s * 0.05)
+	_glow(ci, b, s * 0.65, Color(0.1, 0.5, 0.3), 0.4, 5)
+	_glow(ci, b + Vector2(0, -s * 0.1), s * 0.4, VIOLET, 0.3, 3)
+	# colossal fractal root-arms
+	for i in 7:
+		var a := -PI * 0.5 + (i - 3) * 0.48
+		_branch(ci, b + Vector2((i - 3) * s * 0.05, -s * 0.05), a, s * 0.22, 3, Color(0.16, 0.3, 0.12), GOLD if i % 2 == 0 else VIOLET, t + i, s * 0.045)
+	# lower roots gripping the ground
+	for i in 5:
+		var a := PI * (0.1 + 0.2 * i)
+		_branch(ci, b + Vector2(0, s * 0.25), a, s * 0.14, 2, Color(0.12, 0.22, 0.1), TEAL, t * 0.5 + i, s * 0.04)
+	# gnarled trunk body
+	var tr := PackedVector2Array()
+	for i in 22:
+		var a := TAU * i / 22.0
+		var r := s * (0.27 + 0.05 * sin(a * 5.0 + 1.0) + 0.02 * sin(t + a * 3.0))
+		tr.append(b + Vector2(cos(a) * r, sin(a) * r * 1.05))
+	_pts(ci, tr, _c(Color(0.1, 0.12, 0.06)), _c(Color(0.45, 0.65, 0.25), 0.9), 2.0)
+	for i in 5:
+		var x := -s * 0.18 + i * s * 0.09
+		ci.draw_line(b + Vector2(x, -s * 0.22), b + Vector2(x * 1.2 + sin(i) * s * 0.03, s * 0.24), _c(Color(0.3, 0.45, 0.15), 0.6), 1.5, true)
+	# crown of thorns
+	for i in 9:
+		var a := -PI + PI * (i + 0.5) / 9.0
+		var p := b + Vector2.from_angle(a) * s * 0.27
+		_tri(ci, p + Vector2.from_angle(a + 1.57) * s * 0.025, p + Vector2.from_angle(a) * s * (0.12 + 0.05 * (i % 2)), p + Vector2.from_angle(a - 1.57) * s * 0.025, _c(Color(0.5, 0.45, 0.2)))
+	# tiny buried eyes
+	for e in [Vector2(-0.1, -0.06), Vector2(0.09, -0.08), Vector2(0.0, 0.03), Vector2(-0.14, 0.08), Vector2(0.13, 0.06)]:
+		_eye(ci, b + e * s, s * 0.016, GOLD if e.x < 0.0 else VIOLET, t + e.x * 5.0)
+	# slow hanging spores
+	for i in 4:
+		var ph := fposmod(t * 0.2 + i * 0.25, 1.0)
+		ci.draw_circle(b + Vector2(sin(i * 2.0) * s * 0.35, -s * 0.2 + ph * s * 0.6), 2.0, _c(GOLD, 0.7 * (1.0 - ph)))

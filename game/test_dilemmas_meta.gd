@@ -15,6 +15,7 @@ func _on_secret(item: String, secret: String) -> void:
 
 func _init() -> void:
 	test_dilemmas()
+	test_expansion_dilemmas()
 	test_meta()
 	quit(1 if fails > 0 else 0)
 
@@ -74,3 +75,28 @@ func test_meta() -> void:
 	check(Meta.is_hero_unlocked("thoth") and Meta.has_trait("spore_sprout", "splits"), "heroes + bestiary persisted")
 	check(Meta.hero_stats["seshat"]["wins"] == 1, "hero stats persisted")
 	DirAccess.remove_absolute(path)
+
+func test_expansion_dilemmas() -> void:
+	check(DilemmaDB.DILEMMAS.size() >= 26, "at least 26 dilemmas (%d)" % DilemmaDB.DILEMMAS.size())
+	var items_given: Dictionary = {}
+	var reveal := 0
+	var modes: Dictionary = {}
+	var ok: bool = true
+	for d: Dictionary in DilemmaDB.DILEMMAS:
+		for c: Dictionary in d["choices"]:
+			ok = ok and str(c["label"]) != "" and str(c["flavor"]) != ""
+			for e: Dictionary in c["effects"]:
+				if e["type"] == "item" and str(e.get("id", "")) != "":
+					items_given[e["id"]] = true
+					ok = ok and not ItemDB.get_def(str(e["id"])).is_empty()
+				if e["type"] == "reveal_glyph":
+					reveal += 1
+					ok = ok and int(e["amount"]) >= 1
+				if e["type"] == "change_path":
+					modes[e["mode"]] = true
+	check(ok, "every dilemma choice has text; item ids exist")
+	check(reveal >= 12, "glyph reveals are common (%d)" % reveal)
+	check(modes.has("wither") and modes.has("sprout") and modes.has("swap") and modes.has("reveal") and modes.has("hide"), "all 5 route modes used")
+	for id in ["prism_lattice", "mirror_shard", "ember_censer", "void_lantern", "tide_flute", "cursed_crown",
+			"hungry_maw", "echo_bell", "spiral_shell", "hollow_idol", "grafted_heart"]:
+		check(items_given.has(id), "a dilemma offers " + id)

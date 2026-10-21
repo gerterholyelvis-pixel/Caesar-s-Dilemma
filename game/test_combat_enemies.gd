@@ -83,6 +83,7 @@ func _init() -> void:
 	test_turn_cycle_and_enemy()
 	test_split_and_traits()
 	test_boss()
+	test_expansion_enemies()
 	test_win_lose()
 	print("RESULT ", "FAIL (%d)" % fails if fails > 0 else "ALL PASS")
 	quit(1 if fails > 0 else 0)
@@ -204,18 +205,18 @@ func test_boss() -> void:
 	var bp := FakeBackpack.new()
 	bp.add(1, "dagger", [])
 	var c := make(bp, ["cascade_warden"])
-	check(c.enemies[0]["max_hp"] == 60, "boss hp 60")
-	c.enemies[0]["hp"] = 35
-	c.use(1)  # 29 -> phase 1 (<0.66)
+	check(c.enemies[0]["max_hp"] == 90, "boss hp 90")
+	c.enemies[0]["hp"] = 55
+	c.use(1)  # 49 -> phase 1 (<0.66)
 	check(c.enemies[0]["phase"] == 1 and c.enemies[0]["intent"]["hits"] == 3, "boss phase 2 intent")
-	c.enemies[0]["hp"] = 12
+	c.enemies[0]["hp"] = 25
 	bp.add(2, "dagger", [])
 	c.end_turn()
 	c.use(2)
 	check(c.enemies[0]["phase"] == 2, "boss phase 3")
 	# step through a phase-2 cycle to the summon
 	var d := make(bp, ["cascade_warden"])
-	d.enemies[0]["hp"] = 30
+	d.enemies[0]["hp"] = 40
 	d.use(1)
 	d.end_turn()  # attack x3
 	d.end_turn()  # split
@@ -242,3 +243,69 @@ func test_win_lose() -> void:
 	l.end_turn()
 	l.end_turn()
 	check(l.is_over() and not l.won and ended_log[-1] == false, "lose")
+
+
+func test_expansion_enemies() -> void:
+	check(EnemyDB.all_ids().size() == 11, "11 enemies")
+	var elites := 0
+	for id in ["mire_leech", "ember_wisp", "mirror_wraith", "shard_hound", "prism_sentinel", "root_tyrant"]:
+		var d := EnemyDB.get_def(id)
+		var ok: bool = not d.is_empty() and d["art"] == id and d["max_hp"] > 0 and d["lore"] != "" and d["name"] != ""
+		for ph in range(maxi((d.get("phases", []) as Array).size(), 1)):
+			var list: Array = EnemyDB.intents_for(id, ph)
+			ok = ok and list.size() >= 2
+			for it: Dictionary in list:
+				ok = ok and it["type"] in ["attack", "block", "heal", "split"] and (it["glyphs"] as Array).size() >= 1
+				if it["type"] == "split":
+					ok = ok and not EnemyDB.get_def(String(it["spawn"])).is_empty()
+		check(ok, "enemydb " + id)
+		if EnemyDB.is_elite(id):
+			elites += 1
+			check((d["traits"] as Array).size() >= 2 and d.has("phases"), "elite %s has hidden traits and phases" % id)
+	check(elites == 2 and not EnemyDB.is_elite("spore_sprout"), "exactly 2 elites")
+	check(EnemyDB.phase_for("cascade_warden", 0.1) == 3 and EnemyDB.phase_for("cascade_warden", 0.2) == 2, "boss 4th phase")
+	check(EnemyDB.phase_for("root_tyrant", 0.5) == 1 and EnemyDB.phase_for("root_tyrant", 0.2) == 2, "root tyrant phases")
+	# floor scaling: only valid, non-boss ids; elites show up later but never on floor 1-4
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 11
+	var seen := {}
+	var early_elite := false
+	for f in range(1, 11):
+		for i in 60:
+			for id in EnemyDB.floor_enemies(f, rng):
+				seen[id] = true
+				if f < 5 and EnemyDB.is_elite(id):
+					early_elite = true
+				if EnemyDB.get_def(id).is_empty() or id == EnemyDB.BOSS_ID:
+					early_elite = true
+	check(not early_elite, "floor_enemies valid, no early elites, no boss")
+	check(seen.has("mire_leech") and seen.has("shard_hound") and seen.has("mirror_wraith") \
+		and seen.has("prism_sentinel") and seen.has("root_tyrant"), "new enemies appear across floors")
+	var el := EnemyDB.elite_enemies(6, rng)
+	check(EnemyDB.is_elite(el[0]) and not (EnemyDB.BOSS_ID in el), "elite_enemies leads with an elite")
+	# elite fight: hidden traits are revealed in play
+	var bp := FakeBackpack.new()
+	bp.add(1, "dagger", [])
+	bp.add(2, "dagger", [])
+	traits.clear()
+	var c := make(bp, ["root_tyrant"])
+	check(c.enemies[0]["max_hp"] == 52 and traits.is_empty(), "traits start hidden")
+	c.enemies[0]["hp"] = 30
+	c.use(1)
+	check(c.enemies[0]["phase"] == 1 and c.enemies[0]["intent"]["type"] == "split", "root tyrant phase 2 intent")
+	check(["root_tyrant", "thorns"] in traits and ["root_tyrant", "splits"] in traits, "thorns and splits revealed")
+	var n0: int = c.enemies.size()
+	c.end_turn()
+	check(c.enemies.size() >= n0 and ["root_tyrant", "summons"] in traits, "root tyrant summons")
+	# prism sentinel: brittle stun when its block is broken
+	traits.clear()
+	var p := make(bp, ["prism_sentinel"])
+	p.end_turn()  # block 8
+	p.use(1)      # 6 damage, block remains
+	p.use(2)      # block exhausted -> brittle
+	check(p.enemies[0]["stunned"] and ["prism_sentinel", "brittle"] in traits, "prism sentinel brittle reveal")
+	# shard hound multi-hit scales player damage
+	var h := make(bp, ["shard_hound"])
+	var hp0: int = h.player["hp"]
+	h.end_turn()
+	check(h.player["hp"] == hp0 - 9, "shard hound 3x3")

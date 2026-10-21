@@ -41,7 +41,7 @@ func _init() -> void:
 		seen[g] = true
 	check(uniq, "all root/modifier glyph ids unique and in 0..4999 (%d)" % r.size())
 
-	var counts := {0: 14, 1: 12, 2: 10, 3: 5, 4: 2, 5: 3, 6: 8, 7: 12}
+	var counts := {0: 26, 1: 20, 2: 10, 3: 11, 4: 2, 5: 3, 6: 8, 7: 20}
 	var ok_counts := true
 	for c in counts:
 		if Lexicon.all_keys(c).size() < counts[c]:
@@ -83,6 +83,25 @@ func _init() -> void:
 	check(Lexicon.learn_random(Lexicon.CAT_HERO, rng) == "", "learn_random exhausted")
 	check(Lexicon.known_fraction(Lexicon.CAT_HERO) == 1.0 and Lexicon.known_fraction() > 0.0, "known_fraction")
 
+	# expansion: every item/enemy has a word with a matching readable name; originals keep their slots
+	var saved_state: Dictionary = Lexicon.export_state()
+	Lexicon.init(1234)
+	var cover := true
+	for id in ItemDB.all_ids():
+		cover = cover and Lexicon.has_concept("item:" + id) and Lexicon.readable_name("item:" + id) == String(ItemDB.get_def(id)["name"])
+	for id in EnemyDB.all_ids():
+		cover = cover and Lexicon.has_concept("enemy:" + id) and Lexicon.readable_name("enemy:" + id) == String(EnemyDB.get_def(id)["name"].replace("The ", ""))
+	check(cover, "every ItemDB / EnemyDB entry has a lexicon word with the right name")
+	var ks: Array[String] = Lexicon.all_keys()
+	check(ks.find("item:glyph_lens") < ks.find("item:prism_lattice") and ks.find("qual:old") < ks.find("qual:cursed") \
+		and ks.find("bonus:luck") < ks.find("bonus:curse"), "new concepts are registered after the originals")
+	var uroots := {}
+	for k in ks:
+		uroots[Lexicon.root_of(k)] = true
+	check(uroots.size() == ks.size(), "all %d roots unique after expansion" % ks.size())
+	for k in ["bonus:diversity", "item:prism_lattice", "enemy:root_tyrant"]:
+		check(Lexicon.word_for(k).size() == 3, "compound word " + k)
+	Lexicon.import_state(saved_state)
 	check(Lexicon.register("item:new_thing", "New Thing") and Lexicon.word_for("item:new_thing").size() == 2, "register more")
 	Lexicon.guess("act:use", "use?")
 	var st: Dictionary = Lexicon.export_state()

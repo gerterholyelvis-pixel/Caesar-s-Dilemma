@@ -14,7 +14,7 @@ func _draw() -> void:
 	for i in 6:
 		draw_circle(vs * Vector2(0.2 + 0.12 * i, 0.5), 220.0, Color(0.1, 0.4, 0.4, 0.04))
 	var ids: Array[String] = ItemDB.all_ids()
-	var cell := 62.0
+	var cell := 44.0
 	var x := 24.0
 	var y := 20.0
 	var row_h := 0.0
@@ -25,7 +25,7 @@ func _draw() -> void:
 		var r := Vector2(sz.x, sz.y) * cell
 		if x + r.x > vs.x - 20.0:
 			x = 24.0
-			y += row_h + 40.0
+			y += row_h + 30.0
 			row_h = 0.0
 		ItemIcons.draw(self, id, Rect2(Vector2(x, y), r), _t, 1.0 if i == 3 or i == 9 else 0.0)
 		draw_string(font, Vector2(x, y + r.y + 14.0), id, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, ItemIcons.cell_color(id))

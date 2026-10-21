@@ -239,3 +239,8 @@ ink-black glassy panels with gold rims (see bubble.gd/choice.gd), glyph names vi
 - game/screens.gd: `LootUI` (show_offers(ids: Array) -> signal chosen(id)), `DilemmaUI` (show(d: Dictionary) -> signal chosen(index: int)), `ShrineUI`
   (offer to learn one glyph word, signal done), `HeroSelectUI` (pick Seshat/Thoth + origin by glyph names, signal picked(hero_id, origin_id)); each a class_name in its
   own file under game/ (loot_ui.gd, dilemma_ui.gd, shrine_ui.gd, hero_select_ui.gd).
+
+## TESTING RULE (a popup alert once appeared on the user's screen)
+NEVER run a game/test_*.gd that does not `extends SceneTree` with `-s` (e.g. test_creatures.gd, test_icons.gd, *_view.gd): Godot shows a modal
+"Can't load the script ... doesn't inherit from SceneTree" ALERT dialog on the user's screen even with --headless. Use ./run_tests.sh
+(runs only the SceneTree tests; test_e2e.gd separately) or run scenes with their .tscn off-screen (--position -32000,-32000).

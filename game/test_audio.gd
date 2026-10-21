@@ -59,7 +59,7 @@ func _init() -> void:
 		names.append("item_" + id)
 	for k in range(1, 7):
 		names.append("syn_%d" % k)
-	check(ItemDB.all_ids().size() == 14, "14 items")
+	check(ItemDB.all_ids().size() == 26, "26 items")
 	var hashes := {}
 	for nm in names:
 		var ok2: bool = bank.has(nm)

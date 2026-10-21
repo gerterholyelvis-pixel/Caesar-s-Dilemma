@@ -26,9 +26,9 @@ func _process(d: float) -> void:
 
 func _draw() -> void:
 	draw_rect(Rect2(0, 0, 1500, 900), Color(0.02, 0.04, 0.07))
-	var kinds := ["spore_sprout", "thorn_crawler", "crystal_moth", "glass_golem", "cascade_warden"]
+	var kinds := ["spore_sprout", "thorn_crawler", "crystal_moth", "glass_golem", "cascade_warden", "mire_leech", "ember_wisp", "mirror_wraith", "shard_hound", "prism_sentinel", "root_tyrant"]
 	for i in kinds.size():
-		CreatureArt.draw(self, kinds[i], Vector2(150 + i * 300, 170), 220, t, 0.5 if (i == 2 and fmod(t, 1.0) < 0.2) else 0.0, 1.0)
+		CreatureArt.draw(self, kinds[i], Vector2(130 + (i % 6) * 250, 120 + (i / 6) * 260), 200 * [1.0, 1.0, 1.0, 1.0, 1.0, 0.8, 0.75, 1.05, 1.0, 1.4, 1.5][i] / 1.0 * 0.8, t, 0.5 if (i == 2 and fmod(t, 1.0) < 0.2) else 0.0, 1.0)
 	for h in 2:
 		for p in 3:
-			CreatureArt.draw_player(self, packs[p], ["seshat", "thoth"][h], Vector2(250 + p * 500, 470 + h * 230), 150, t, 0.0, 1.0)
+			CreatureArt.draw_player(self, packs[p], ["seshat", "thoth"][h], Vector2(250 + p * 500, 680 + h * 190), 110, t, 0.0, 1.0)

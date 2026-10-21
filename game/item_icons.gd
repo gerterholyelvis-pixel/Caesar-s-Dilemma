@@ -33,6 +33,18 @@ const COLORS := {
 	"moss_charm": Color(0.50, 0.85, 0.30),
 	"fractal_seed": Color(0.70, 0.40, 1.0),
 	"glyph_lens": Color(0.60, 1.0, 0.95),
+	"prism_lattice": Color(0.55, 0.95, 1.0),
+	"mirror_shard": Color(0.65, 0.88, 0.92),
+	"ember_censer": Color(0.95, 0.62, 0.30),
+	"void_lantern": Color(0.35, 0.85, 1.0),
+	"tide_flute": Color(0.80, 0.90, 0.85),
+	"oath_stone": Color(1.0, 0.82, 0.38),
+	"cursed_crown": Color(0.60, 0.38, 0.95),
+	"hungry_maw": Color(0.78, 0.45, 0.95),
+	"echo_bell": Color(0.50, 0.90, 1.0),
+	"spiral_shell": Color(0.30, 0.85, 0.75),
+	"hollow_idol": Color(0.95, 0.78, 0.40),
+	"grafted_heart": Color(0.70, 0.35, 0.95),
 }
 
 static var _t := 0.0
@@ -80,6 +92,18 @@ static func draw(ci: CanvasItem, id: String, rect: Rect2, t := 0.0, glow := 0.0)
 		"moss_charm": _moss_charm(ci, q, col)
 		"fractal_seed": _fractal_seed(ci, q, col)
 		"glyph_lens": _glyph_lens(ci, q, col)
+		"prism_lattice": _prism_lattice(ci, q, col)
+		"mirror_shard": _mirror_shard(ci, q, col)
+		"ember_censer": _ember_censer(ci, q, col)
+		"void_lantern": _void_lantern(ci, q, col)
+		"tide_flute": _tide_flute(ci, q, col)
+		"oath_stone": _oath_stone(ci, q, col)
+		"cursed_crown": _cursed_crown(ci, q, col)
+		"hungry_maw": _hungry_maw(ci, q, col)
+		"echo_bell": _echo_bell(ci, q, col)
+		"spiral_shell": _spiral_shell(ci, q, col)
+		"hollow_idol": _hollow_idol(ci, q, col)
+		"grafted_heart": _grafted_heart(ci, q, col)
 	# cell rim (glass edge), brighter on hover
 	for cc2 in shape:
 		var v2: Vector2i = cc2
@@ -551,3 +575,220 @@ static func _glyph_lens(ci: CanvasItem, q: Rect2, c: Color) -> void:
 	# glass highlight arcs
 	ci.draw_arc(cen, R * 0.86, PI * 1.05, PI * 1.45, 8, Color(1, 1, 1, 0.75), 2.0, true)
 	_glint(ci, cen + Vector2(-R, R) * 0.6, cen + Vector2(R, -R) * 0.6, 0.3)
+
+
+# --- new items (v2 content) --------------------------------------------------
+
+static func _cross(ci: CanvasItem, c: Vector2, r: float, col: Color, depth: int) -> void:
+	var a := r * 0.34
+	var pts := PackedVector2Array([Vector2(-a, -r), Vector2(a, -r), Vector2(a, -a), Vector2(r, -a), Vector2(r, a), Vector2(a, a), Vector2(a, r), Vector2(-a, r), Vector2(-a, a), Vector2(-r, a), Vector2(-r, -a), Vector2(-a, -a)])
+	var cols := PackedColorArray()
+	for i in pts.size():
+		pts[i] = c + pts[i]
+		cols.append(col.lerp(GOLD, 0.5 * float(i % 3) / 2.0).lightened(0.1))
+	ci.draw_polygon(pts, cols)
+	_loop(ci, pts, col, 1.2)
+	if depth > 0:
+		for k in 4:
+			var d := Vector2.from_angle(k * PI * 0.5)
+			_cross(ci, c + d * r * 0.68, r * 0.26, col.lerp(GOLD, 0.4), depth - 1)
+
+
+static func _prism_lattice(ci: CanvasItem, q: Rect2, c: Color) -> void:
+	var cen := q.get_center()
+	ci.draw_circle(cen, _u * 0.3, Color(c.r, c.g, c.b, 0.12 + 0.1 * _g))
+	_cross(ci, cen, _u * 0.46, c, 1)
+	_cross(ci, cen, _u * 0.2, Color(0.2, 0.3, 0.5), 0)
+	var ph: float = 0.5 + 0.5 * sin(_t * 2.0)
+	ci.draw_circle(cen, _u * 0.05, Color(1, 1, 0.9, 0.6 + 0.4 * ph))
+	_glint(ci, _p(q, 0.2, 0.2), _p(q, 0.8, 0.8), 0.3)
+
+
+static func _mirror_shard(ci: CanvasItem, q: Rect2, c: Color) -> void:
+	var pts := _pp(q, [0.5, 0.06, 0.78, 0.38, 0.66, 0.94, 0.34, 0.8, 0.22, 0.34])
+	_body(ci, pts, _vgrad(pts, q, Color(0.85, 1.0, 1.0), Color(0.25, 0.5, 0.55)), c, 1.4, 0.0)
+	var crack: Color = INK.lightened(0.2)
+	_line(ci, _p(q, 0.5, 0.06), _p(q, 0.46, 0.4), crack, 0.8)
+	_line(ci, _p(q, 0.46, 0.4), _p(q, 0.62, 0.62), crack, 0.8)
+	_line(ci, _p(q, 0.46, 0.4), _p(q, 0.30, 0.58), crack, 0.8)
+	var e := _p(q, 0.5, 0.6)
+	ci.draw_circle(e, _u * 0.07, Color(INK.r, INK.g, INK.b, 0.8))
+	ci.draw_circle(e + Vector2(sin(_t) * _u * 0.015, 0), _u * 0.035, GOLD)
+	_glint(ci, _p(q, 0.3, 0.2), _p(q, 0.7, 0.8), 0.0)
+
+
+static func _ember_censer(ci: CanvasItem, q: Rect2, c: Color) -> void:
+	# horizontal 2x1: bowl on the left half, violet-gold smoke glyphs drifting right
+	_line(ci, _p(q, 0.25, 0.0), _p(q, 0.25, 0.22), c, 0.9)
+	_line(ci, _p(q, 0.25, 0.22), _p(q, 0.12, 0.42), c, 0.7)
+	_line(ci, _p(q, 0.25, 0.22), _p(q, 0.38, 0.42), c, 0.7)
+	var bowl := PackedVector2Array()
+	for i in 13:
+		var a: float = PI * float(i) / 12.0
+		bowl.append(_p(q, 0.25 + cos(a) * 0.16, 0.42 + sin(a) * 0.38))
+	ci.draw_polygon(bowl, _vgrad(bowl, q, Color(0.85, 0.52, 0.2), Color(0.3, 0.15, 0.08)))
+	_loop(ci, bowl, GOLD, 1.2)
+	ci.draw_circle(_p(q, 0.25, 0.44), _u * 0.07, Color(1, 0.7, 0.3, 0.85))
+	var pl := PackedVector2Array()
+	for i in 16:
+		var f: float = float(i) / 15.0
+		pl.append(_p(q, 0.3 + f * 0.62, 0.4 + sin(f * 8.0 - _t * 2.0) * 0.16 * f - f * 0.2))
+	ci.draw_polyline(pl, Color(VIOLET.r, VIOLET.g, VIOLET.b, 0.6 + 0.2 * _g), 2.0, true)
+	for i in 3:
+		var gp := _p(q, 0.5 + 0.17 * float(i), 0.22 + 0.12 * sin(float(i) * 2.0 + _t))
+		ci.draw_arc(gp, _u * 0.05, 0, TAU * 0.75, 8, GOLD, 1.0, true)
+
+
+static func _void_lantern(ci: CanvasItem, q: Rect2, c: Color) -> void:
+	var cen := _p(q, 0.25, 0.5)
+	ci.draw_circle(cen, _u * 0.3, Color(0, 0, 0, 0.55))
+	var body := _pp(q, [0.12, 0.2, 0.38, 0.2, 0.44, 0.5, 0.38, 0.82, 0.12, 0.82, 0.06, 0.5])
+	ci.draw_polygon(body, _rgrad(body, cen, _u * 0.3, Color(0.4, 0.9, 1.0), Color(0.02, 0.03, 0.06)))
+	_loop(ci, body, c, 1.3)
+	_line(ci, _p(q, 0.25, 0.2), _p(q, 0.25, 0.06), c, 0.9)
+	ci.draw_arc(_p(q, 0.25, 0.06), _u * 0.05, PI, TAU, 8, GOLD, 1.2, true)
+	var pulse: float = 0.5 + 0.5 * sin(_t * 2.6)
+	ci.draw_circle(cen, _u * (0.07 + 0.02 * pulse), Color(1, 1, 1, 0.95))
+	for i in 6:
+		var a: float = TAU * float(i) / 6.0 + _t * 0.3
+		ci.draw_line(cen + Vector2.from_angle(a) * _u * 0.2, cen + Vector2.from_angle(a) * _u * 0.1, Color(c.r, c.g, c.b, 0.8), 1.2, true)
+	var fp := _p(q, 0.75, 0.84)
+	ci.draw_arc(fp, _u * 0.2, 0, TAU, 20, Color(c.r, c.g, c.b, 0.3), 1.5, true)
+	ci.draw_arc(fp, _u * 0.12, 0, TAU, 14, Color(c.r, c.g, c.b, 0.5), 1.0, true)
+	ci.draw_circle(fp, _u * 0.05, Color(0, 0, 0, 0.9))
+
+
+static func _tide_flute(ci: CanvasItem, q: Rect2, c: Color) -> void:
+	var pts := _pp(q, [0.04, 0.38, 0.96, 0.34, 0.98, 0.5, 0.96, 0.66, 0.04, 0.62, 0.0, 0.5])
+	ci.draw_polygon(pts, _vgrad(pts, q, Color(1, 0.97, 0.88), Color(0.7, 0.68, 0.58)))
+	_loop(ci, pts, c, 1.2)
+	for i in 4:
+		var hp := _p(q, 0.30 + 0.17 * float(i), 0.5)
+		ci.draw_circle(hp, _u * 0.06, INK)
+		for k in 2:
+			var ph: float = fposmod(_t * 0.5 + float(i) * 0.25 + float(k) * 0.5, 1.0)
+			ci.draw_arc(hp + Vector2(0, -_u * 0.05), _u * (0.08 + 0.22 * ph), PI * 1.15, PI * 1.85, 10, Color(TEAL.r, TEAL.g, TEAL.b, 0.9 * (1.0 - ph)), 1.3, true)
+	ci.draw_circle(_p(q, 0.12, 0.5), _u * 0.07, Color(CYAN.r, CYAN.g, CYAN.b, 0.9))
+	_glint(ci, _p(q, 0.1, 0.4), _p(q, 0.9, 0.6), 0.2)
+
+
+static func _oath_stone(ci: CanvasItem, q: Rect2, c: Color) -> void:
+	var pts := _pp(q, [0.3, 0.05, 0.7, 0.1, 0.8, 0.45, 0.74, 0.95, 0.26, 0.95, 0.2, 0.5])
+	ci.draw_polygon(pts, _vgrad(pts, q, Color(0.2, 0.2, 0.28), Color(0.04, 0.04, 0.08)))
+	_loop(ci, pts, Color(0.5, 0.45, 0.6), 1.2)
+	var pulse: float = 0.5 + 0.5 * sin(_t * 1.8)
+	var seam := PackedVector2Array([_p(q, 0.5, 0.14), _p(q, 0.44, 0.34), _p(q, 0.56, 0.5), _p(q, 0.46, 0.7), _p(q, 0.52, 0.86)])
+	ci.draw_polyline(seam, Color(c.r, c.g, c.b, 0.25 + 0.25 * pulse), _u * 0.1, true)
+	ci.draw_polyline(seam, Color(1, 0.95, 0.7), 1.6, true)
+	ci.draw_circle(_p(q, 0.5, 0.5), _u * 0.2, Color(c.r, c.g, c.b, 0.08 + 0.1 * pulse))
+	_glint(ci, _p(q, 0.3, 0.2), _p(q, 0.7, 0.9), 0.5)
+
+
+static func _cursed_crown(ci: CanvasItem, q: Rect2, c: Color) -> void:
+	var pts := _pp(q, [0.04, 0.62, 0.06, 0.14, 0.24, 0.4, 0.38, 0.04, 0.5, 0.36, 0.62, 0.04, 0.76, 0.4, 0.94, 0.14, 0.96, 0.62, 0.86, 0.7, 0.14, 0.7])
+	ci.draw_polygon(pts, _vgrad(pts, q, Color(0.16, 0.1, 0.28), Color(0.02, 0.02, 0.05)))
+	_loop(ci, pts, c, 1.4)
+	_line(ci, _p(q, 0.12, 0.64), _p(q, 0.88, 0.64), GOLD, 1.0)
+	for i in 3:
+		ci.draw_circle(_p(q, 0.3 + 0.2 * float(i), 0.57), _u * 0.035, CYAN if i == 1 else VIOLET)
+	for pp in [Vector2(0.06, 0.12), Vector2(0.94, 0.12), Vector2(0.38, 0.03), Vector2(0.62, 0.03)]:
+		ci.draw_circle(_p(q, pp.x, pp.y), _u * 0.03, GOLD)
+	for i in 4:
+		var ph: float = fposmod(_t * 0.4 + float(i) * 0.27, 1.0)
+		var x: float = 0.2 + 0.2 * float(i)
+		var dp := _p(q, x, 0.7 + ph * 0.28)
+		ci.draw_line(_p(q, x, 0.7), dp, Color(0.02, 0.0, 0.06, 0.8), _u * 0.035, true)
+		ci.draw_circle(dp, _u * 0.025, Color(c.r, c.g, c.b, 0.9 * (1.0 - ph)))
+
+
+static func _hungry_maw(ci: CanvasItem, q: Rect2, c: Color) -> void:
+	var gul := _p(q, 0.25, 0.5)
+	ci.draw_circle(gul, _u * 0.35, Color(c.r * 0.5, c.g * 0.2, c.b * 0.6, 0.55))
+	var up := _pp(q, [0.06, 0.45, 0.1, 0.1, 0.5, 0.02, 0.95, 0.12, 0.9, 0.3, 0.5, 0.28])
+	var lo := _pp(q, [0.06, 0.55, 0.1, 0.9, 0.5, 0.98, 0.95, 0.88, 0.9, 0.7, 0.5, 0.72])
+	var mouth: float = 0.02 * sin(_t * 2.0)
+	for j in 2:
+		var pp: PackedVector2Array = up if j == 0 else lo
+		ci.draw_polygon(pp, _vgrad(pp, q, Color(0.95, 0.9, 0.78), Color(0.55, 0.5, 0.42)))
+		_loop(ci, pp, c, 1.2)
+		var sg: float = 1.0 if j == 0 else -1.0
+		var ty: float = 0.29 if j == 0 else 0.71
+		for i in 4:
+			var tx: float = 0.32 + 0.16 * float(i)
+			_tri(ci, _p(q, tx - 0.05, ty - sg * 0.02 + mouth), _p(q, tx + 0.05, ty - sg * 0.02 + mouth), _p(q, tx, ty + sg * 0.14 + mouth), Color(1, 0.98, 0.9))
+	ci.draw_circle(gul, _u * 0.09, Color(0.2, 0.05, 0.35))
+	ci.draw_arc(gul, _u * 0.14, 0, TAU, 12, Color(c.r, c.g, c.b, 0.6), 1.2, true)
+	_glint(ci, _p(q, 0.2, 0.1), _p(q, 0.9, 0.9), 0.4)
+
+
+static func _echo_bell(ci: CanvasItem, q: Rect2, c: Color) -> void:
+	for i in 3:
+		var ph: float = fposmod(_t * 0.4 + float(i) / 3.0, 1.0)
+		var rc := _p(q, 0.3 + 0.5 * ph, 0.3 + 0.5 * ph)
+		ci.draw_arc(rc, _u * (0.14 + 0.1 * ph), 0, TAU, 18, Color(c.r, c.g, c.b, 0.55 * (1.0 - ph)), 1.3, true)
+	var pts := _pp(q, [0.3, 0.06, 0.4, 0.1, 0.44, 0.3, 0.52, 0.42, 0.56, 0.46, 0.04, 0.46, 0.08, 0.42, 0.16, 0.3, 0.2, 0.1])
+	ci.draw_polygon(pts, _vgrad(pts, q, Color(0.85, 1.0, 1.0, 0.9), Color(0.2, 0.55, 0.7, 0.8)))
+	_loop(ci, pts, c, 1.3)
+	_line(ci, _p(q, 0.3, 0.46), _p(q, 0.3, 0.52), GOLD, 1.2)
+	ci.draw_circle(_p(q, 0.3 + sin(_t * 3.0) * 0.02, 0.54), _u * 0.04, GOLD)
+	ci.draw_circle(_p(q, 0.3, 0.05), _u * 0.03, GOLD)
+	_glint(ci, _p(q, 0.15, 0.1), _p(q, 0.5, 0.45), 0.3)
+
+
+static func _spiral_shell(ci: CanvasItem, q: Rect2, c: Color) -> void:
+	var cen := _p(q, 0.5, 0.52)
+	var pl := PackedVector2Array()
+	var n := 36
+	for i in n + 1:
+		var f: float = float(i) / float(n)
+		var a: float = f * TAU * 2.4 + 0.5
+		var r: float = _u * (0.46 * (1.0 - 0.9 * f) + 0.02)
+		pl.append(cen + Vector2(cos(a) * r * 1.25, sin(a) * r * 0.9))
+	ci.draw_circle(cen, _u * 0.42, Color(TEAL.r, TEAL.g, TEAL.b, 0.2))
+	ci.draw_polyline(pl, Color(c.r, c.g, c.b, 0.25 + 0.2 * _g), _u * 0.16, true)
+	ci.draw_polyline(pl, Color(0.1, 0.45, 0.45), _u * 0.07, true)
+	ci.draw_polyline(pl, _rim(GOLD), 1.3, true)
+	for i in 4:
+		ci.draw_line(cen, pl[6 + i * 7], Color(GOLD.r, GOLD.g, GOLD.b, 0.4), 1.0, true)
+	ci.draw_circle(pl[n], _u * 0.05, Color(1, 1, 0.9))
+	_glint(ci, _p(q, 0.2, 0.2), _p(q, 0.8, 0.8), 0.1)
+
+
+static func _hollow_idol(ci: CanvasItem, q: Rect2, c: Color) -> void:
+	var head := _p(q, 0.5, 0.2)
+	var body := _pp(q, [0.5, 0.36, 0.76, 0.46, 0.7, 0.94, 0.3, 0.94, 0.24, 0.46])
+	ci.draw_polygon(body, _vgrad(body, q, Color(1, 0.88, 0.5), Color(0.55, 0.38, 0.12)))
+	_loop(ci, body, GOLD, 1.3)
+	ci.draw_circle(head, _u * 0.15, Color(0.95, 0.78, 0.38))
+	ci.draw_arc(head, _u * 0.15, 0, TAU, 14, _rim(GOLD), 1.3, true)
+	ci.draw_circle(head + Vector2(-_u * 0.055, 0), _u * 0.035, INK)
+	ci.draw_circle(head + Vector2(_u * 0.055, 0), _u * 0.035, INK)
+	var hol := _pp(q, [0.5, 0.52, 0.62, 0.62, 0.56, 0.8, 0.44, 0.8, 0.38, 0.62])
+	ci.draw_colored_polygon(hol, Color(0.0, 0.0, 0.03))
+	_loop(ci, hol, Color(0.45, 0.25, 0.8), 0.9)
+	var pulse: float = 0.5 + 0.5 * sin(_t * 1.6)
+	ci.draw_circle(_p(q, 0.5, 0.68), _u * 0.03, Color(VIOLET.r, VIOLET.g, VIOLET.b, 0.3 + 0.5 * pulse))
+	_glint(ci, _p(q, 0.3, 0.1), _p(q, 0.7, 0.9), 0.6)
+
+
+static func _grafted_heart(ci: CanvasItem, q: Rect2, c: Color) -> void:
+	var cen := _p(q, 0.5, 0.5)
+	var pulse: float = 1.0 + 0.05 * sin(_t * 3.0)
+	var pts := PackedVector2Array()
+	for i in 28:
+		var a: float = TAU * float(i) / 28.0
+		var hx: float = 16.0 * pow(sin(a), 3.0)
+		var hy: float = -(13.0 * cos(a) - 5.0 * cos(2.0 * a) - 2.0 * cos(3.0 * a) - cos(4.0 * a))
+		pts.append(cen + Vector2(hx, hy) * _u * 0.027 * pulse)
+	ci.draw_circle(cen, _u * 0.4, Color(c.r, c.g, c.b, 0.14 + 0.1 * _g))
+	ci.draw_polygon(pts, _rgrad(pts, cen, _u * 0.45, Color(0.85, 0.4, 0.9), Color(0.25, 0.1, 0.45)))
+	_loop(ci, pts, c, 1.4)
+	for i in 5:
+		var sp: Vector2 = cen + Vector2(-0.2 + 0.1 * float(i), -0.12 + 0.06 * float(i)) * _u
+		ci.draw_line(sp + Vector2(-3, -3), sp + Vector2(3, 3), Color(1, 0.9, 0.6, 0.9), 1.0, true)
+		ci.draw_line(sp + Vector2(3, -3), sp + Vector2(-3, 3), Color(1, 0.9, 0.6, 0.9), 1.0, true)
+	_line(ci, _p(q, 0.5, 0.1), _p(q, 0.4, 0.0), EMERALD, 1.0)
+	_line(ci, _p(q, 0.6, 0.12), _p(q, 0.74, 0.02), EMERALD, 1.0)
+	_line(ci, _p(q, 0.45, 0.9), _p(q, 0.3, 1.0), EMERALD, 1.0)
+	_line(ci, _p(q, 0.62, 0.88), _p(q, 0.8, 0.98), EMERALD, 1.0)
+	ci.draw_circle(cen + Vector2(-_u * 0.08, -_u * 0.08), _u * 0.05, Color(1, 1, 1, 0.3))

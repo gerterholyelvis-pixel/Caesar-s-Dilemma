@@ -49,6 +49,7 @@ var visited: Dictionary = {}         # node type -> times resolved (stats / test
 var screen_factory: Callable = Callable()
 var screen_hook: Callable = Callable()   # (kind, node) called once a screen is open; tests drive it
 var instant := false
+var _first_glyph_shown := false
 var autoplay := false
 var music: Node = null               # optional: Music node (set_theme); installed lazily when empty and not instant
 var sfx: Node = null
@@ -142,6 +143,8 @@ func begin(p_hero: String, p_origin: String, p_seed := -1) -> void:
 	map.call("generate", rng.randi(), origin_id, hero_id)
 	_theme("map")
 	state_changed.emit()
+	if not instant:
+		await Cinematics.hero_reveal(self, hero_id)
 	_loop()
 
 
@@ -150,6 +153,11 @@ func _end(p_won: bool) -> void:
 		return
 	ended = true
 	won = p_won
+	if not instant:
+		if p_won:
+			await Cinematics.ending(self, hero_id)
+		elif hp <= 0:
+			await Cinematics.death(self)
 	fresh_heroes = Meta.record_run(hero_id, p_won, depth)
 	Meta.save()
 	_theme("garden")
@@ -212,6 +220,8 @@ func _resolve(node: Dictionary) -> void:
 		"elite":
 			await _fight(EnemyDB.floor_enemies(floor_n + 2, rng), floor_n + 1, 0.8, true)
 		"boss":
+			if not instant:
+				await Cinematics.boss_intro(self, EnemyDB.BOSS_ID)
 			var ok: bool = await _fight([EnemyDB.BOSS_ID], floor_n + 2, 0.0, false, true)
 			if ok and not ended:
 				_end(true)
@@ -571,8 +581,14 @@ func _reveal_random() -> void:
 func _learn(key: String) -> bool:
 	if Meta.is_known(key) and Lexicon.is_known(key):
 		return false
+	# the very first glyph a traveler ever understands gets its moment (later words stay quiet)
+	var first_ever := not key.begins_with("loc:") and not instant and not _first_glyph_shown \
+		and Meta.known_words.keys().all(func(k): return String(k).begins_with("loc:"))
 	Lexicon.learn(key)
 	var fresh: bool = Meta.mark_known(key)
+	if fresh and first_ever:
+		_first_glyph_shown = true
+		Cinematics.first_glyph(self, key)
 	if fresh and hero_id == "thoth" and not key.begins_with("loc:"):
 		max_hp += 1
 		hp = mini(max_hp, hp + 2)
