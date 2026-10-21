@@ -1,0 +1,6 @@
+.godot/
+*.tmp
+user://
+shots*/
+lab_*/
+*.avi

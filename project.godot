@@ -1,0 +1,18 @@
+config_version=5
+
+[application]
+
+config/name="Alchemist"
+run/main_scene="res://start_screen.tscn"
+config/features=PackedStringArray("4.3")
+
+[display]
+
+window/size/viewport_width=960
+window/size/viewport_height=640
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+
+[rendering]
+
+environment/defaults/default_clear_color=Color(0.1, 0.08, 0.25, 1)
