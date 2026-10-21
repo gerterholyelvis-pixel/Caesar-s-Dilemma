@@ -182,3 +182,60 @@ Systems should hide, hint and reward curiosity rather than explain everything:
 - ITEM NAMING: replace the earlier fixed `glyphs: Array[int]` in item definitions by LEXICON lookups:
   `Lexicon.word_for("item:" + id)`. Concept keys look like "item:bone_blade", "bonus:damage", "loc:fight",
   "enemy:spore_sprout", "hero:seshat", "origin:eclipse", "act:use".
+
+## STEP 2 ADDITIONS (art, audio, cinematics)
+- Heroes' SEED FORMS: `seshat` = measuring spiral / star-lattice (gold + cyan), `thoth` = ibis-curved prism / crescent (violet + teal).
+- creature_art.gd extra API for the player (replaces the simple "player" kind): 
+  `CreatureArt.draw_player(ci: CanvasItem, bp, hero_id: String, center: Vector2, size: float, t: float, hurt := 0.0, grow := 1.0)`
+  where `bp` is a Backpack (or null for a bare seed). The body = the hero's seed form at the core, plus one self-similar
+  branch/organ per placed item (shape/colour by item tags and id: blades=spikes, shields=shell plates, heals=blooms,
+  energy=orbiting shards, fractal_seed=recursive sprouts); items that are adjacent (ItemDB/Backpack.neighbors) resonate with glowing
+  links. Deterministic from (hero, pack layout); `grow` 0..1 scales growth for tween-in. Also `CreatureArt.pack_signature(bp) -> int`
+  so callers know when to re-bake/regrow.
+- Audio (all generated in code, baked into AudioStreamWAV on a worker thread, never per-frame synthesis; follow layers/audio.gd):
+  `game/sfx.gd` (class_name Sfx, Node): `Sfx.install(parent: Node, lexicon_seed: int)`; `play(name: String)` for names: ui_click, ui_hover,
+  place_item, rotate_item, invalid, hit_enemy, hit_player, block, heal, energy, end_turn, win, lose, glyph_learn, secret_found,
+  path_change; `play_item(item_id: String)` = every item has its OWN signature sound (derived from the id and its tags so blades ring metallic,
+  shields thud with lapis chime, heals bloom, etc.); `play_synergy(count: int)` = chord that grows with adjacent links.
+  `game/music.gd` (class_name Music, Node): `Music.install(parent, lexicon_seed)`; `set_theme(name)` for themes limbo, garden, map, battle, boss, shrine
+  (crossfade ~2 s); `set_tension(v: float 0..1)` fades stem layers; the lexicon seed picks the player's mode/motif so every profile sounds different;
+  loopable bars baked at install on a thread; ambient, mystical, melodic and NOT random-sounding (motif memory, weighted scale-degree walks, slow pads, sparse bell/chime).
+- Cinematics: `game/cutscene.gd` (class_name Cutscene, Node): a code-built timeline runner: `Cutscene.new()` then chain
+  `at(t, callable)`, `tween(obj, prop, to, dur, delay)`, `shader(material, param, to, dur, delay)`, `sound(name, delay)`, `letterbox(show, dur)`,
+  `shake(amount, dur)`, `wait(dur)`; `play()` is awaitable, emits `finished`; `skip()` jumps to the end by fast-forwarding tweens
+  (`Tween.custom_step(9999)`, never `kill()` while awaiting); skip with any key if `skippable`.
+
+## AUDIO THEORY DIRECTIVE (user: "use math and music theory for the sounds and rhythms")
+Sound and rhythm are built from real math and music theory, which also fits the fractal/mysterious identity:
+- TUNING: just intonation / ratio-based scales (e.g. 1:1, 9:8, 5:4, 4:3, 3:2, 5:3, 15:8) or per-profile tunings derived from the lexicon seed;
+  synergy chords = small-integer harmonic ratios (stacked 3:2 and 5:4 fifths/thirds); dissonance (tritone 45:32, minor 2nds) reserved for danger/boss.
+- HARMONY: modal progressions and proper VOICE LEADING (smooth common-tone motion), chord tones on strong beats, cadences that resolve
+  (and deliberately unresolved/suspended endings for mystery); pads are stacked partials; bell timbres use inharmonic partials (e.g. 1, 2.76, 5.4).
+- RHYTHM: Euclidean rhythms E(k,n) (e.g. E(3,8), E(5,8), E(7,12)), polyrhythms (3:2, 4:3), swing from golden-ratio offsets,
+  Fibonacci/golden-ratio phrase lengths (3,5,8,13 bars/beats), tempo/meter per theme; fractal/self-similar melodies via L-systems
+  (a motif that contains scaled copies of itself), with item/synergy count mapped to rhythmic density.
+- SOUNDS: envelopes, FM/additive synthesis with ratio-locked carriers/modulators, harmonic series for item voices (id -> partial set).
+
+## STEP 3 UI/FLOW APIs (agents build in parallel against these; step-2 art may land later: guard with `ClassDB`-free fallbacks, i.e. wrap calls in
+## `if ItemIcons != null`-style checks via a tiny helper that draws a coloured rounded rect when the class is missing)
+All screens are Controls drawn over the LOCKED garden background (garden.tscn after intro; ground line y = 0.80 of the screen), design size 960x640,
+ink-black glassy panels with gold rims (see bubble.gd/choice.gd), glyph names via Lexicon + GlyphGen (word_for -> draw determinative + roots), numbers always plain.
+- game/backpack_ui.gd `class_name BackpackUI` (Control): `setup(bp: Backpack, mode: String)` modes "arrange" | "combat" | "view"; `refresh()`;
+  `hold(item_id: String)` carry a NEW item with a ghost preview (green/red validity, snap, R or right-click rotates, left-click places, Esc cancels);
+  drag existing items in arrange mode; signals `item_clicked(uid)`, `item_hovered(uid)`, `placed(uid)`, `hold_finished(placed: bool)`;
+  combat mode: clicking an affordable item emits `item_clicked`; props `energy:int`, `used:Array` set by caller to dim items; live synergy links glow between
+  adjacent items; built-in tooltip using `Backpack.describe(uid)` + glyph name; item icons via ItemIcons.draw (fallback rect), cached/baked, only hovered redraw live.
+- game/battle.gd `class_name Battle` (Control): `start(bp: Backpack, enemy_ids: Array, player_state: Dictionary, hero_id: String, rng: RandomNumberGenerator)`;
+  signal `finished(won: bool, player_state: Dictionary)`. Shows player (CreatureArt.draw_player) left on the ground line, enemies right with HP bars + intent icons,
+  BackpackUI in combat mode at the bottom, energy pips, End Turn button, floating damage numbers, hit-stop/shake juice, Sfx calls guarded with has_method.
+- game/route_map.gd `class_name RouteMap` (Control): `generate(seed: int, origin_id: String, hero_id: String)`; a FRACTAL TREE: nodes
+  {id:int, type:String ("fight","elite","treasure","shop","rest","shrine","dilemma","mystery","boss"), depth:int, children:Array, revealed:bool, state:"open"|"withered"|"done"|"current"};
+  `reveal_choices()`; `mutate(mode: String)` modes wither|sprout|swap|reveal|hide (only unseen sub-branches change); signal `node_chosen(node: Dictionary)`;
+  per-system seeded RNGs; STS-like structure (fixed early fight row, mid treasure, rest before boss, "?" nodes self-balancing, Dilemmas as rare "?" outcomes);
+  node types shown as glyph words (Lexicon "loc:<type>") with a readable label once known; beautiful glowing branching-tree drawing with growth animation.
+- game/run.gd `class_name Run` (Control) = the flow brain: `begin(hero_id, origin_id)`; map -> node resolution (fight=Battle, treasure/loot=LootUI+BackpackUI.hold,
+  shop, rest=heal, shrine=ShrineUI (learn a glyph), dilemma=DilemmaUI, boss=Battle with EnemyDB.BOSS_ID, mystery=random); updates Meta (record_run, secrets via
+  Meta.on_secret_discovered, bestiary, known words), signal `run_ended(won: bool, depth: int)`; starting packs per hero/origin.
+- game/screens.gd: `LootUI` (show_offers(ids: Array) -> signal chosen(id)), `DilemmaUI` (show(d: Dictionary) -> signal chosen(index: int)), `ShrineUI`
+  (offer to learn one glyph word, signal done), `HeroSelectUI` (pick Seshat/Thoth + origin by glyph names, signal picked(hero_id, origin_id)); each a class_name in its
+  own file under game/ (loot_ui.gd, dilemma_ui.gd, shrine_ui.gd, hero_select_ui.gd).

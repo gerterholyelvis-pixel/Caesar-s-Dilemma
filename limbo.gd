@@ -24,6 +24,9 @@ var picked := false
 
 func _ready() -> void:
 	get_viewport().use_hdr_2d = false
+	Hub.boot()
+	Hub.audio(get_tree())
+	Hub.theme("limbo")
 	var sz := get_viewport_rect().size
 	ground_y = sz.y * 0.80
 
@@ -185,6 +188,8 @@ func _on_chosen(index: int) -> void:
 	if picked:
 		return
 	picked = true
+	Hub.origin_hint = ["eclipse", "mirror", "cathedral"][clampi(index, 0, 2)]
+	Hub.sfx("ui_click")
 	for c in choices:
 		c.enabled = false
 	_blip(1.2)
@@ -239,7 +244,7 @@ func _farewell() -> void:
 	var go := create_tween()
 	go.tween_property(glow, "color:a", 1.0, 1.7).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	await go.finished
-	get_tree().change_scene_to_file("res://garden.tscn")
+	get_tree().change_scene_to_file("res://run_scene.tscn")
 
 
 func _make_specks(at: Vector2, extent: Vector2, count: int, col: Color, sz: float, life: float) -> CPUParticles2D:

@@ -25,6 +25,9 @@ var locked := false
 
 func _ready() -> void:
 	get_viewport().use_hdr_2d = false
+	Hub.boot()
+	Hub.audio(get_tree())
+	Hub.theme("garden")
 
 	for l in LAYERS:
 		var name: String = l[0]
