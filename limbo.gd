@@ -20,10 +20,14 @@ var voice: Array[AudioStreamPlayer] = []
 var voice_i := 0
 var ground_y := 0.0
 var picked := false
+var shake := 0.0
+var tscale := 1.0   # "-- --fast" shortens the collapse waits
 
 
 func _ready() -> void:
 	get_viewport().use_hdr_2d = false
+	if "--fast" in OS.get_cmdline_user_args():
+		tscale = 0.25
 	Hub.boot()
 	Hub.audio(get_tree())
 	Hub.theme("limbo")
@@ -62,6 +66,7 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	mat.set_shader_parameter("aspect", size.x / maxf(size.y, 1.0))
+	position = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * shake if shake > 0.01 else Vector2.ZERO
 
 
 # ---------- the angel ----------
@@ -205,46 +210,138 @@ func _on_chosen(index: int) -> void:
 	create_tween().tween_property(choices[index], "modulate:a", 0.0, 0.5)
 	await _unsay()
 	await _say("...")
-	await _farewell()
+	await _collapse()
 
 
-# The angel takes off its hat, bows with it held to its chest, and dissolves into ash, the red hat
-# lingering last. Then a warm light carries the player to the Hanging Gardens of Babylon.
-func _farewell() -> void:
-	angel.waving = false
-	await get_tree().create_timer(1.1).timeout
+# After the "...": silence, the angel lowers his gaze, the floor of Limbo cracks and gives way.
+func _collapse() -> void:
+	await get_tree().create_timer(1.6 * tscale).timeout
 	await _unsay()
-	await get_tree().create_timer(0.3).timeout
+	angel.waving = false
+	# the angel lowers his gaze (a slow bow about his feet) and his shadow thickens
+	var bow := create_tween().set_parallel(true)
+	bow.tween_property(angel, "rotation", 0.06, 1.4).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	bow.tween_property(get_node("Shadow"), "color:a", 0.7, 1.4)
+	await get_tree().create_timer(1.8 * tscale).timeout
 
-	var lift := create_tween()
-	lift.tween_property(angel, "hat_e", 1.0, 1.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	await lift.finished
-	await get_tree().create_timer(0.9).timeout
+	var sz := get_viewport_rect().size
+	var origin := Vector2(sz.x * 0.5, ground_y + sz.y * 0.05)
 
-	var body_c := angel.position + Vector2(0, -90)
-	var specks := _make_specks(body_c, Vector2(30, 85), 80, Color(0.06, 0.06, 0.08), 1.0, 2.6)
-	add_child(specks)
-	specks.emitting = true
-	var embers := _make_specks(angel.position + Vector2(0, -88), Vector2(14, 8), 14, Color(0.95, 0.14, 0.1), 0.55, 3.0)
-	add_child(embers)
-	var vanish := create_tween().set_parallel(true)
-	vanish.tween_property(angel, "fade", 1.0, 2.7).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	vanish.tween_property(angel, "position:y", angel.position.y - 12.0, 2.7).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	vanish.tween_property(get_node("Shadow"), "color:a", 0.0, 2.4)
-	await get_tree().create_timer(1.4).timeout
-	embers.emitting = true
-	await vanish.finished
-	await get_tree().create_timer(1.3).timeout
+	# low rumble + screen tremor
+	var rum := AudioStreamPlayer.new()
+	rum.stream = _make_rumble(4.5)
+	rum.volume_db = -3.0
+	add_child(rum)
+	rum.play()
+	shake = 0.0
+	create_tween().tween_property(self, "shake", 7.0, 3.4 * tscale).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 
-	var glow := ColorRect.new()
-	glow.color = Color(1.0, 0.95, 0.82, 0.0)
-	glow.set_anchors_preset(Control.PRESET_FULL_RECT)
-	glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(glow)
-	var go := create_tween()
-	go.tween_property(glow, "color:a", 1.0, 1.7).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	await go.finished
-	get_tree().change_scene_to_file("res://garden.tscn")
+	# fissures spread from beneath the traveler, glowing from within
+	var cr := _Cracks.new()
+	cr.origin = origin
+	cr.setup(sz, ground_y)
+	add_child(cr)
+	var spread := create_tween()
+	spread.tween_property(cr, "prog", 1.0, 3.2 * tscale).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+
+	# ash lifts off the floor along the cracks
+	var lift := _make_specks(origin, Vector2(sz.x * 0.22, 6), 70, Color(0.55, 0.50, 0.46), 1.2, 3.0)
+	add_child(lift)
+	lift.emitting = true
+	var emb := _make_specks(origin, Vector2(sz.x * 0.16, 6), 40, Color(1.0, 0.38, 0.1), 0.8, 3.2)
+	add_child(emb)
+	emb.emitting = true
+	await get_tree().create_timer(2.6 * tscale).timeout
+	lift.emitting = true
+	emb.emitting = true
+	await spread.finished
+
+	# the floor gives way: the crack-light floods up, then the world goes dark and we drop
+	var gl := ColorRect.new()
+	gl.color = Color(0.9, 0.22, 0.04, 0.0)
+	gl.set_anchors_preset(Control.PRESET_FULL_RECT)
+	gl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(gl)
+	var g1 := create_tween()
+	g1.tween_property(gl, "color:a", 0.55, 0.5 * tscale).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	g1.tween_property(gl, "color", Color(0.02, 0.0, 0.0, 1.0), 0.7 * tscale)
+	create_tween().tween_property(self, "shake", 0.0, 1.2 * tscale)
+	await g1.finished
+	position = Vector2.ZERO
+
+	await FallCinematic.play(self)
+	get_tree().change_scene_to_file("res://descent/obsidian_scene.tscn")
+
+
+func _make_rumble(dur: float) -> AudioStreamWAV:
+	var rate := 22050
+	var n := int(dur * rate)
+	var data := PackedByteArray()
+	data.resize(n * 2)
+	var lp := 0.0
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	for i in n:
+		var t := float(i) / rate
+		var env := clampf(t / 3.0, 0.0, 1.0) * clampf((dur - t) / 0.8, 0.0, 1.0)
+		lp += (rng.randf_range(-1.0, 1.0) - lp) * 0.02
+		var v := (lp * 5.0 + sin(TAU * 38.0 * t) * 0.35 + sin(TAU * 23.0 * t) * 0.3) * env * 0.5
+		data.encode_s16(i * 2, int(clampf(v, -1.0, 1.0) * 32000.0))
+	var w := AudioStreamWAV.new()
+	w.format = AudioStreamWAV.FORMAT_16_BITS
+	w.mix_rate = rate
+	w.data = data
+	return w
+
+
+
+# Jagged glowing fissures radiating from `origin`; `prog` (0..1) is how far they have crept.
+class _Cracks extends Node2D:
+	var origin := Vector2.ZERO
+	var prog := 0.0
+	var paths: Array = []   # each: PackedVector2Array from origin outward
+	var widths: Array = []
+
+	func setup(sz: Vector2, gy: float) -> void:
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 1311
+		for k in 13:
+			var ang := lerpf(-PI * 0.97, -PI * 0.03, float(k) / 12.0) + rng.randf_range(-0.12, 0.12)
+			# fissures also run along the floor, so squash the vertical reach
+			var reach_len := rng.randf_range(0.28, 0.62) * sz.x
+			var pts := PackedVector2Array([origin])
+			var p := origin
+			var a := ang
+			var steps := 14
+			for s in steps:
+				a += rng.randf_range(-0.45, 0.45)
+				p += Vector2(cos(a), sin(a) * 0.38) * (reach_len / steps)
+				pts.append(p)
+			paths.append(pts)
+			widths.append(rng.randf_range(2.0, 5.0))
+
+	func _process(_d: float) -> void:
+		queue_redraw()
+
+	func _draw() -> void:
+		var t := Time.get_ticks_msec() * 0.001
+		for i in paths.size():
+			var pts: PackedVector2Array = paths[i]
+			var n := pts.size()
+			var reach := prog * float(n - 1) * (0.7 + 0.3 * float(i % 3) / 2.0)
+			var upto := clampi(int(ceil(reach)) + 1, 2, n)
+			var seg := PackedVector2Array()
+			for j in upto:
+				seg.append(pts[j])
+			if upto >= 2 and reach < float(n - 1):
+				var f := reach - floorf(reach)
+				seg[upto - 1] = pts[upto - 2].lerp(pts[upto - 1], f if f > 0.0 else 1.0)
+			var w: float = widths[i] * (0.5 + prog)
+			var pulse := 0.8 + 0.2 * sin(t * 6.0 + float(i))
+			draw_polyline(seg, Color(1.0, 0.25, 0.04, 0.10 * pulse * prog), w * 7.0, true)
+			draw_polyline(seg, Color(1.0, 0.35, 0.06, 0.35 * pulse), w * 2.6, true)
+			draw_polyline(seg, Color(0.02, 0.0, 0.0, 0.95), w * 1.2, true)
+			draw_polyline(seg, Color(1.0, 0.72, 0.3, 0.8 * prog), maxf(1.0, w * 0.35), true)
 
 
 func _make_specks(at: Vector2, extent: Vector2, count: int, col: Color, sz: float, life: float) -> CPUParticles2D:
