@@ -51,6 +51,7 @@ func _init() -> void:
 	check(tot_bytes < 40 * 1024 * 1024, "memory %.1f MB" % (tot_bytes / 1048576.0))
 	check(tsum < 6000, "music total bake %d ms" % tsum)
 	theory()
+	idle_theory()
 	var t2 := Time.get_ticks_msec()
 	var bank := Sfx.bake_all(1234)
 	print("sfx bake ms ", Time.get_ticks_msec() - t2)
@@ -245,3 +246,175 @@ func theory() -> void:
 	for q in pa["ratios"]:
 		inh = inh or absf(float(q) - roundf(float(q))) > 0.2
 	check(inh and int(pa["fm_c"]) <= 7 and int(pa["fm_m"]) <= 7, "item bell partials inharmonic, FM ratio %d:%d small-integer" % [pa["fm_c"], pa["fm_m"]])
+
+
+func fold_ratio(r: float) -> float:
+	while r >= 2.0:
+		r *= 0.5
+	while r < 1.0:
+		r *= 2.0
+	return minf(r, 2.0 / r)
+
+
+func idle_theory() -> void:
+	var t1 := Time.get_ticks_msec()
+	var r := Music.bake_idle(1234)
+	var bake_ms := Time.get_ticks_msec() - t1
+	var r2 := Music.bake_idle(1234)
+	var det := true
+	for i in Music.IDLE_STEMS:
+		det = det and hash(r["stems"][i].to_byte_array()) == hash(r2["stems"][i].to_byte_array())
+	var r3 := Music.bake_idle(777)
+	var diff := false
+	for i in Music.IDLE_STEMS:
+		diff = diff or hash(r["stems"][i].to_byte_array()) != hash(r3["stems"][i].to_byte_array())
+	check(det and diff, "idle deterministic per seed, differs across seeds")
+	check(bake_ms < 3500, "idle bake %d ms" % bake_ms)
+	var bytes := 0
+	for i in Music.IDLE_STEMS:
+		bytes += (r["stems"][i] as PackedFloat32Array).size() * 2
+	check(bytes < 12 * 1024 * 1024, "idle memory %.1f MB (total with themes < 40 MB)" % (bytes / 1048576.0))
+	# tempo / structure
+	var tempo_ok := true
+	for s in [1, 2, 3, 42, 777, 9001, 31337, 123456]:
+		var bp: float = Music.bake_idle(s)["bpm"] if s == 1234 else 58.0 + float(Music._mix(s ^ 0x1D1E) % 9)
+		tempo_ok = tempo_ok and bp >= 57.5 and bp <= 66.5
+	check(tempo_ok and r["bpm"] > 57.5 and r["bpm"] < 66.5, "idle tempo %.1f BPM in 58..66" % r["bpm"])
+	check(Music.is_fib(int(r["bars"])) and int(r["bars"]) == 13 and int(r["beats"]) == 4, "idle loop = 13 bars (Fibonacci) of 4/4")
+	# seam continuity per stem (last sample continues into first)
+	var seam_ok := true
+	var msg := ""
+	for i in Music.IDLE_STEMS:
+		var st: PackedFloat32Array = r["stems"][i]
+		var n := st.size()
+		var gap := absf(st[0] - st[n - 1])
+		var mx := 0.0
+		for k in range(-100, 100):
+			mx = maxf(mx, absf(st[posmod(k + 1, n)] - st[posmod(k, n)]) if k != -1 else 0.0)
+		if gap > 1.5 * mx + 1e-4 or gap > 0.04:
+			seam_ok = false
+			msg += " stem%d gap=%.4f local=%.4f" % [i, gap, mx]
+		if peak(st) > Music.IDLE_STEM_PEAK[i] + 1e-4 or peak(st) < 0.005:
+			seam_ok = false
+			msg += " stem%d peak=%.3f" % [i, peak(st)]
+	check(seam_ok, "idle seam continuity + stem peaks" + msg)
+	# drone is an exact 3:2 (integer cycles per loop)
+	var rt: float = r["root_hz"]
+	check(near(Music.idle_ratio(3), 1.5, 1e-12) and near(Music.idle_ratio(5), 2.0, 1e-12) and near(Music.idle_ratio(-1), 5.0 / 6.0, 1e-12), "idle scale: 3:2 fifth, 2:1 octave, 5:3 sixth")
+	# Euclid E(3,8) pluck pattern + motif memory (Fibonacci word)
+	var per_bar := {}
+	for e in r["events"]:
+		if int(e["stem"]) == 1 or int(e["stem"]) == 2:
+			var b := int(floorf(float(e["t0"]) / 4.0))
+			if not per_bar.has(b):
+				per_bar[b] = []
+			per_bar[b].append({"s": int(round((float(e["t0"]) - b * 4.0) * 2.0)), "d": int(e["d"]), "stem": int(e["stem"])})
+	var eu_ok := per_bar.size() == 13
+	var memo_a := 0
+	var memo_ok := true
+	var cell: Array = r["cell"]
+	var word: String = r["word"]
+	for b in per_bar:
+		var ev: Array = per_bar[b]
+		ev.sort_custom(func(x: Dictionary, y: Dictionary) -> bool: return x["s"] < y["s"])
+		var steps: Array = []
+		for x in ev:
+			steps.append(x["s"])
+		eu_ok = eu_ok and steps == Music.euclid_onsets(3, 8)
+		var same := 0
+		for k in 3:
+			same += 1 if int(ev[k]["d"]) == int(cell[k]) else 0
+		if word[b] == "A":
+			memo_a += 1
+			memo_ok = memo_ok and same == 3
+		else:
+			memo_ok = memo_ok and same == 2 and int(ev[2]["d"]) == int(cell[2]) + 1
+	check(eu_ok, "idle plucks use E(3,8) onsets 0,3,6 in every bar")
+	check(memo_ok and memo_a == 8 and word.length() >= 13, "idle motif memory: %d/13 bars repeat the cell, others answer with +1 on the last note (Fibonacci word %s)" % [memo_a, word.substr(0, 13)])
+	var on_sparse := 0
+	for e in r["events"]:
+		on_sparse += 1 if int(e["stem"]) == 1 else 0
+	check(on_sparse == 5, "idle level-0 pluck is very sparse (%d notes per 13 bars)" % on_sparse)
+	# consonance: all pairs sounding at the same time reduce to pentatonic intervals (no semitone, no tritone)
+	var allowed: Array = []
+	for a in 5:
+		for b in 5:
+			allowed.append(fold_ratio(Music.IDLE_SCALE[b] / Music.IDLE_SCALE[a]))
+	var ev: Array = r["events"]
+	var bad := 0
+	var forbidden := 0
+	var pairs := 0
+	for i in ev.size():
+		for j in range(i + 1, ev.size()):
+			if float(ev[i]["t0"]) < float(ev[j]["t1"]) and float(ev[j]["t0"]) < float(ev[i]["t1"]):
+				pairs += 1
+				var q := fold_ratio(Music.idle_ratio(int(ev[i]["d"])) / Music.idle_ratio(int(ev[j]["d"])))
+				var ok := false
+				for al in allowed:
+					ok = ok or near(q, al, 1e-9)
+				bad += 0 if ok else 1
+				forbidden += 1 if (near(q, 45.0 / 32.0, 1e-3) or near(q, 16.0 / 15.0, 1e-3) or q < 1.1) and not near(q, 1.0, 1e-9) else 0
+	var okset := true
+	for al in allowed:
+		okset = okset and not near(al, 45.0 / 32.0, 1e-3) and not near(al, 16.0 / 15.0, 1e-3)
+	check(bad == 0 and forbidden == 0 and okset and pairs > 500, "idle consonance: %d overlapping note pairs, 0 outside pentatonic intervals, 0 semitones/tritones" % pairs)
+	# voice leading
+	var vo: Array = r["voicings"]
+	var mot := 0.0
+	var common := 0
+	for i in vo.size():
+		var a: Array = vo[i]
+		var b: Array = vo[(i + 1) % vo.size()]
+		mot += Music.idle_cost(a, b) / 3.0
+		for x in a:
+			common += 1 if b.has(x) else 0
+	mot /= vo.size()
+	check(mot < 330.0 and common >= 12, "idle voice leading: avg %.0f cents/voice per change, %d common tones held" % [mot, common])
+	# progress levels: gains and real mixes
+	var g0 := Music.idle_gains(0.0)
+	var g5 := Music.idle_gains(5.0)
+	var gm := true
+	for L in range(1, 6):
+		var a := Music.idle_gains(float(L - 1))
+		var b := Music.idle_gains(float(L))
+		for i in Music.IDLE_STEMS:
+			gm = gm and b[i] >= a[i]
+		gm = gm and b[L + 1] == 1.0 and a[L + 1] == 0.0
+	check(gm and g0[2] == 0.0 and g0[1] == 1.0 and g5[6] == 1.0, "idle levels add exactly one stem each (0 = drone + sparse pluck)")
+	var cum := Music.idle_upsample(r["stems"][0], 4000)
+	cum = cum.duplicate()
+	var up1 := Music.idle_upsample(r["stems"][1], 16000)
+	for k in cum.size():
+		cum[k] += up1[k]
+	var rms_prev := -1.0
+	var rms_ok := true
+	var peak_ok := true
+	var rms_str := ""
+	var mix0 := PackedFloat32Array()
+	var mix3 := PackedFloat32Array()
+	for L in 6:
+		if L >= 1:
+			var up := Music.idle_upsample(r["stems"][L + 1], Music.IDLE_RATES[L + 1])
+			for k in cum.size():
+				cum[k] += up[k]
+		var ss := 0.0
+		for v in cum:
+			ss += v * v
+		var rms := sqrt(ss / cum.size())
+		rms_ok = rms_ok and rms > rms_prev
+		rms_prev = rms
+		peak_ok = peak_ok and peak(cum) < 0.35
+		rms_str += "L%d rms=%.3f pk=%.3f  " % [L, rms, peak(cum)]
+		if L == 0:
+			mix0 = cum.duplicate()
+		if L == 3:
+			mix3 = cum.duplicate()
+	check(rms_ok and peak_ok, "idle progress adds energy, mix peak < 0.35: " + rms_str)
+	var seam_mix := absf(cum[0] - cum[cum.size() - 1])
+	check(seam_mix < 0.02, "idle full mix seam gap %.4f" % seam_mix)
+	Hub.idle_music(3)
+	check(true, "Hub.idle_music no-op headless")
+	var dir := ProjectSettings.globalize_path("res://").path_join("../audio_preview")
+	DirAccess.make_dir_recursive_absolute(dir)
+	_save(mix0.slice(0, 30 * 16000), dir.path_join("idle_level0.wav"))
+	_save(mix3.slice(0, 30 * 16000), dir.path_join("idle_level3.wav"))

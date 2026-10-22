@@ -36,6 +36,19 @@ const THEME_NAMES: Array[String] = ["limbo", "garden", "map", "battle", "boss", 
 ## beats = beats per bar (meter), bars = Fibonacci phrase length, k = Euclid onsets [calm, dense] in n = beats*npb steps,
 ## cad: authentic | plagal (resolved) | half | sus (unresolved), swing: golden-ratio swing, poly: a:b polyrhythm,
 ## danger: 0 none, 1 minor second touch, 2 tritone + minor second drone.
+## "idle" theme: calm progressive background score for the idle game (see bake_idle). Not part of THEME_NAMES
+## (which keeps the 4-stem layout); it has IDLE_STEMS stems, each at its own sample rate.
+const IDLE_STEMS := 7
+const IDLE_BARS := 13                                    # Fibonacci phrase length
+const IDLE_BEATS := 4
+const IDLE_RATES: Array[int] = [4000, 16000, 16000, 8000, 4000, 8000, 4000]
+const IDLE_STEM_PEAK: Array[float] = [0.09, 0.065, 0.055, 0.03, 0.04, 0.03, 0.03]   # sums to 0.34 < 0.35 cap
+const IDLE_SCALE: Array[float] = [1.0, 9.0 / 8.0, 5.0 / 4.0, 3.0 / 2.0, 5.0 / 3.0]  # major pentatonic, just intonation
+const IDLE_DB := -18.0
+const IDLE_FADE := 4.0
+## Chords as pentatonic pitch classes (all consonant, no semitones anywhere): I, I, vi, Isus2, I, Vsus4, vi, I6, I, vi, Vsus4, Isus2, I.
+const IDLE_PROG: Array = [[0, 2, 3], [0, 2, 3], [4, 0, 2], [0, 1, 3], [0, 2, 3], [3, 0, 1], [4, 0, 2], [0, 2, 4], [0, 2, 3], [4, 0, 2], [3, 0, 1], [0, 1, 3], [0, 2, 3]]
+const IDLE_CELLS: Array = [[12, 13, 11], [13, 12, 15], [10, 13, 12], [12, 15, 13]]   # singable 3-note motif cells (scale degrees)
 const THEMES := {
 	"limbo": {"bpm": 48.0, "beats": 3, "bars": 5, "prog": [0, 5, 3, 6, 4], "cad": "sus", "mel_base": 67, "voice": "bell", "gap": 2, "perc": "heart", "arp": "", "npb": 2, "k": [2, 3], "swing": false, "poly": [3, 2], "danger": 0, "b1": 0.45, "b2": 0.0},
 	"garden": {"bpm": 66.0, "beats": 3, "bars": 8, "prog": [0, 2, 3, 0, 5, 3, 4, 0], "cad": "authentic", "mel_base": 69, "voice": "glass", "gap": 1, "perc": "heart", "arp": "", "npb": 2, "k": [2, 4], "swing": true, "poly": [3, 2], "danger": 0, "b1": 0.5, "b2": 0.0},
@@ -59,6 +72,8 @@ var _tgain := {}         # theme -> current crossfade gain 0..1
 var _target := ""
 var _tension := 0.0
 var _tension_s := 0.0
+var _prog := 0.0         # idle progress level target 0..5
+var _prog_s := 0.0
 
 
 static func install(parent: Node, lexicon_seed: int) -> Music:
@@ -70,7 +85,7 @@ static func install(parent: Node, lexicon_seed: int) -> Music:
 
 
 func _ready() -> void:
-	for t in THEME_NAMES:
+	for t in THEME_NAMES + ["idle"]:
 		_tgain[t] = 0.0
 		var th := Thread.new()
 		th.start(_bake_worker.bind(t))
@@ -85,7 +100,7 @@ func _exit_tree() -> void:
 
 
 func _bake_worker(theme: String) -> void:
-	var r := bake_theme(theme, _seed)
+	var r := bake_idle(_seed) if theme == "idle" else bake_theme(theme, _seed)
 	var bytes: Array = []
 	for s in r["stems"]:
 		bytes.append(Sfx.to_pcm(s))
@@ -95,11 +110,16 @@ func _bake_worker(theme: String) -> void:
 
 
 func set_theme(theme_name: String) -> void:
-	_target = theme_name if THEMES.has(theme_name) else ""
+	_target = theme_name if (THEMES.has(theme_name) or theme_name == "idle") else ""
 
 
 func set_tension(v: float) -> void:
 	_tension = clampf(v, 0.0, 1.0)
+
+
+## Idle score progress 0..5: level 0 = drone/pad + very sparse pluck, each level fades in one more stem.
+func set_progress(level: int) -> void:
+	_prog = float(clampi(level, 0, 5))
 
 
 ## Hook: replace a baked stem with a composed stream later (theme, stem 0..3).
@@ -123,7 +143,7 @@ func _collect() -> void:
 		for b in bytes:
 			var w := AudioStreamWAV.new()
 			w.format = AudioStreamWAV.FORMAT_16_BITS
-			w.mix_rate = RATE
+			w.mix_rate = IDLE_RATES[arr.size()] if t == "idle" else RATE
 			w.stereo = false
 			w.data = b
 			w.loop_mode = AudioStreamWAV.LOOP_FORWARD
@@ -137,14 +157,18 @@ func _collect() -> void:
 			pl.append(p)
 		_streams[t] = arr
 		_players[t] = pl
-	baked = _streams.size() == THEME_NAMES.size()
+	baked = _streams.size() == THEME_NAMES.size() + 1
 
 
 func _process(dt: float) -> void:
-	if _streams.size() < THEME_NAMES.size():
+	if _streams.size() < THEME_NAMES.size() + 1:
 		_collect()
+	_prog_s = move_toward(_prog_s, _prog, dt / 5.0)
 	_tension_s += (_tension - _tension_s) * minf(1.0, dt * 1.5)
 	for t in _players:
+		if t == "idle":
+			_process_idle(dt)
+			continue
 		var th: Dictionary = THEMES[t]
 		var g: float = _tgain[t]
 		var want := 1.0 if t == _target else 0.0
@@ -166,6 +190,25 @@ func _process(dt: float) -> void:
 			if not p.playing:
 				p.play()
 			p.volume_db = linear_to_db(maxf(g * g * gs[i], 0.00001)) + master_db
+
+
+func _process_idle(dt: float) -> void:
+	var g: float = _tgain["idle"]
+	var want := 1.0 if _target == "idle" else 0.0
+	g = move_toward(g, want, dt / IDLE_FADE)       # slow 4 s fade in / out
+	_tgain["idle"] = g
+	var pl: Array = _players["idle"]
+	if g <= 0.0005 and want == 0.0:
+		if (pl[0] as AudioStreamPlayer).playing:
+			for p in pl:
+				(p as AudioStreamPlayer).stop()
+		return
+	var gs := idle_gains(_prog_s)
+	for i in IDLE_STEMS:
+		var p: AudioStreamPlayer = pl[i]
+		if not p.playing:
+			p.play()
+		p.volume_db = linear_to_db(maxf(g * g * gs[i], 0.00001)) + IDLE_DB
 
 
 # ------------------------------------------------------------------ musical profile / tuning
@@ -686,3 +729,374 @@ static func _percussion(out: PackedFloat32Array, dense: PackedFloat32Array, kind
 						out[(s0 + i) % n] += src[i] * a
 					else:
 						dense[(s0 + i) % n] += src[i] * a
+
+
+# ------------------------------------------------------------------ "idle" theme: calm progressive background score
+## Theory: everything lives in the just-intonation major pentatonic 1, 9:8, 5:4, 3:2, 5:3 (no semitone, no tritone,
+## so every simultaneous pair is a pure consonance or a whole-tone-sized step). Sustained drone = root + 3:2 fifth
+## (exact, integer cycles per loop) with a slow breathing swell (13 breaths per loop). Chords are voice-led
+## (Viterbi over octave placements, common tones stay put) over a 13-bar Fibonacci loop at 58..66 BPM in 4/4.
+## Plucks follow the Euclidean rhythm E(3,8); the motif is a 3-note cell varied by the Fibonacci word
+## A->AB, B->A (A bars repeat the cell, B bars answer with a raised last note = motif memory); the arpeggio uses
+## E(5,8); the counter-melody doubles its note count on B bars. Reverb tails are baked per note (multi-tap).
+## Stems: 0 drone+pad, 1 sparse pluck, 2 remaining E(3,8) plucks, 3 arpeggio shimmer, 4 bass pulse, 5 counter-melody,
+## 6 choir pad. Stem i fades in at progress level idle_gains(): 0,0,1,2,3,4,5.
+
+static func idle_ratio(d: int) -> float:
+	return IDLE_SCALE[posmod(d, 5)] * pow(2.0, floorf(float(d) / 5.0))
+
+
+static func idle_gains(level: float) -> Array[float]:
+	var g: Array[float] = [1.0, 1.0]
+	for i in range(1, 6):
+		g.append(clampf(level - float(i - 1), 0.0, 1.0))
+	return g
+
+
+static func _icents(d: int) -> float:
+	return 1200.0 * log(idle_ratio(d)) / log(2.0)
+
+
+static func idle_cost(a: Array, b: Array) -> float:
+	var s := 0.0
+	for i in 3:
+		s += absf(_icents(int(a[i])) - _icents(int(b[i])))
+	return s
+
+
+## Cyclic voice leading of IDLE_PROG: one sorted triple of absolute scale degrees (3..12) per bar.
+static func idle_voicings() -> Array:
+	var cands: Array = []
+	for ch in IDLE_PROG:
+		var opts: Array = []
+		for pc in ch:
+			var o: Array = []
+			for d in range(3, 13):
+				if posmod(d, 5) == int(pc):
+					o.append(d)
+			opts.append(o)
+		var cs: Array = []
+		for x in opts[0]:
+			for y in opts[1]:
+				for z in opts[2]:
+					var v := [x, y, z]
+					v.sort()
+					if int(v[2]) - int(v[0]) <= 5:   # close position: within one octave
+						cs.append(v)
+		cands.append(cs)
+	var nb := cands.size()
+	var best_cost := 1e18
+	var best: Array = []
+	var starts: Array = cands[0]
+	for si in starts.size():
+		var pc: Array = []
+		for j in starts.size():
+			pc.append(0.0 if j == si else 1e18)
+		var backs: Array = []
+		for b in range(1, nb):
+			var cc: Array = []
+			var bb: Array = []
+			for j in cands[b].size():
+				var bc := 1e18
+				var bi := 0
+				for i in cands[b - 1].size():
+					var c: float = float(pc[i]) + idle_cost(cands[b - 1][i], cands[b][j])
+					if c < bc:
+						bc = c
+						bi = i
+				cc.append(bc)
+				bb.append(bi)
+			pc = cc
+			backs.append(bb)
+		for j in cands[nb - 1].size():
+			var total: float = float(pc[j]) + idle_cost(cands[nb - 1][j], starts[si])
+			if total < best_cost:
+				best_cost = total
+				var path: Array = [j]
+				var cj: int = j
+				for b in range(nb - 2, -1, -1):
+					cj = int(backs[b][cj])
+					path.push_front(cj)
+				best = []
+				for b in nb:
+					best.append(cands[b][path[b]])
+	return best
+
+
+static func _idle_add(out: PackedFloat32Array, src: PackedFloat32Array, start: int, vel: float) -> void:
+	var n := out.size()
+	var s0 := posmod(start, n)
+	for i in src.size():
+		var k := s0 + i
+		if k >= n:
+			k -= n
+		out[k] += src[i] * vel
+
+
+## Plucked music-box / glass note with a baked multi-tap reverb tail ("pluck" or "glass").
+static func _idle_note(kind: String, f: float, rate: int) -> PackedFloat32Array:
+	var parts: Array = [[1.0, 1.0, 1.8], [2.0, 0.28, 3.2], [2.76, 0.08, 7.0]]
+	var dur := 2.4
+	var lp := 0.5
+	var ntap := 6
+	var att := 0.006
+	if kind == "glass":
+		parts = [[1.0, 1.0, 2.2], [2.0, 0.2, 4.0]]
+		dur = 1.8
+		lp = 0.6
+		ntap = 4
+		att = 0.004
+	var delays := [0.113, 0.197, 0.311, 0.467, 0.683, 0.971]
+	var gains := [0.42, 0.36, 0.30, 0.24, 0.18, 0.12]
+	var dl := int(dur * rate)
+	var dry := PackedFloat32Array()
+	dry.resize(dl)
+	for p in parts:
+		var w := TAU * f * float(p[0]) / rate
+		if w >= PI * 0.9:
+			continue
+		var a := float(p[1])
+		var dk := exp(-float(p[2]) / rate)
+		for i in dl:
+			dry[i] += sin(w * i) * a
+			a *= dk
+	var na := maxi(1, int(att * rate))
+	var nf := int(0.4 * rate)
+	var y := 0.0
+	for i in dl:
+		var e := 1.0
+		if i < na:
+			e = sin(PI * 0.5 * i / na)
+			e *= e
+		elif i > dl - nf:
+			e = sin(PI * 0.5 * (dl - i) / nf)
+			e *= e
+		y += lp * (dry[i] * e - y)
+		dry[i] = y
+	var out := PackedFloat32Array()
+	out.resize(dl + int(float(delays[ntap - 1]) * rate) + 1)
+	for i in dl:
+		out[i] = dry[i]
+	for t in ntap:
+		var d := int(float(delays[t]) * rate)
+		var g: float = gains[t]
+		for i in dl:
+			out[d + i] += dry[i] * g
+	return out
+
+
+## Sustained soft tone (counter-melody voice or bass): slow raised-cosine attack and release.
+static func _idle_sustain(f: float, hold: int, rate: int, att: float, rel: float, h2: float, decay: float) -> PackedFloat32Array:
+	var na := maxi(1, int(att * rate))
+	var nr := maxi(1, int(rel * rate))
+	var total := hold + nr
+	var out := PackedFloat32Array()
+	out.resize(total)
+	var w := TAU * f / rate
+	var a := 1.0
+	var dk := exp(-decay / rate)
+	for i in total:
+		var e := 1.0
+		if i < na:
+			e = sin(PI * 0.5 * i / na)
+			e *= e
+		elif i > hold:
+			e = sin(PI * 0.5 * (total - i) / nr)
+			e *= e
+		out[i] = (sin(w * i) + sin(w * 2.0 * i) * h2) * e * a
+		a *= dk
+	return out
+
+
+static func _idle_nearest(prev: int, pcs: Array, lo: int, hi: int, avoid: int) -> int:
+	var best := lo
+	var bd := 1e9
+	for d in range(lo, hi + 1):
+		if pcs.has(posmod(d, 5)) and d != avoid:
+			var c := absf(float(d - prev)) + float(d) * 0.001
+			if c < bd:
+				bd = c
+				best = d
+	return best
+
+
+## One crossfaded chord segment of the pad (kind 0) or choir (kind 1) stem.
+static func _idle_chord(out: PackedFloat32Array, root_hz: float, voices: Array, shift: int, start: int, length: int, fade: int, rate: int, kind: int, wb: float) -> void:
+	var n := out.size()
+	var ws: Array[float] = []
+	for d in voices:
+		ws.append(TAU * root_hz * idle_ratio(int(d) + shift) / rate)
+	for j in length:
+		var e := 1.0
+		if j < fade:
+			e = sin(PI * 0.5 * j / fade)
+			e *= e
+		elif j > length - fade:
+			e = sin(PI * 0.5 * (length - j) / fade)
+			e *= e
+		var v := 0.0
+		for w in ws:
+			if kind == 0:
+				v += sin(w * j) * 0.5 + sin(w * 1.0025 * j) * 0.35
+			else:
+				v += sin(w * j) + sin(w * 1.004 * j) * 0.6 + sin(w * 2.0 * j) * 0.3
+		var k := posmod(start + j, n)
+		out[k] += v * e * (0.8 + 0.2 * sin(wb * k + 1.3))
+
+
+## Returns {"stems": [IDLE_STEMS buffers at IDLE_RATES], "rates", "n" (samples at 4 kHz = loop length), "bpm", "bars", "beats",
+## "cell", "word", "voicings", "events": [{stem,t0,t1 (beats),d (scale degree)}], "euclid": [k, n], "root_hz"}.
+static func bake_idle(lexicon_seed: int) -> Dictionary:
+	var P := profile(lexicon_seed)
+	var h := _mix(lexicon_seed ^ 0x1D1E)
+	var bpm := 58.0 + float(h % 9)                       # 58..66 BPM
+	var q := int(round(60.0 / bpm * 4000.0))             # samples per beat at 4 kHz (so every rate divides evenly)
+	var B := IDLE_BEATS
+	var bars := IDLE_BARS
+	var nbeats := B * bars
+	var root_hz: float = float(P["root_hz"])
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(P["motif_seed"]) ^ 0x1D1E
+	var cell: Array = IDLE_CELLS[(h >> 8) % IDLE_CELLS.size()]
+	var word := lsystem("A", {"A": "AB", "B": "A"}, 6)
+	var voic := idle_voicings()
+	var events: Array = []
+	var sec_beats := bpm / 60.0                          # beats per second
+	var ns: Array[int] = []
+	var stems: Array = []
+	for i in IDLE_STEMS:
+		var ni: int = nbeats * q * IDLE_RATES[i] / 4000
+		ns.append(ni)
+		var bf := PackedFloat32Array()
+		bf.resize(ni)
+		stems.append(bf)
+
+	# --- stem 0: drone (root + exact 3:2, integer cycles per loop => seamless) + slow voice-led pad, breathing swell
+	var n0: int = ns[0]
+	var s0: PackedFloat32Array = stems[0]
+	var k0 := int(round(root_hz * float(n0) / 4000.0 / 2.0)) * 2
+	var w0 := TAU * float(k0) / float(n0)
+	var wb := TAU * 13.0 / float(n0)
+	for i in n0:
+		var sw := 0.72 + 0.28 * sin(wb * i)
+		s0[i] = (sin(w0 * i) * 0.8 + sin(w0 * 1.5 * i) * 0.5 + sin(w0 * 2.0 * i) * 0.14) * sw
+	events.append({"stem": 0, "t0": 0.0, "t1": float(nbeats), "d": 0})
+	events.append({"stem": 0, "t0": 0.0, "t1": float(nbeats), "d": 3})
+	var fade := q * 2
+	for b in bars:
+		_idle_chord(s0, root_hz, voic[b], 0, b * B * q - fade / 2, B * q + fade, fade, 4000, 0, wb)
+		for d in voic[b]:
+			events.append({"stem": 0, "t0": float(b * B) - 0.5, "t1": float(b * B + B) + 0.5, "d": int(d)})
+
+	# --- stems 1/2: E(3,8) plucks, motif cell + Fibonacci-word variation; stem 1 keeps only the first note of Fibonacci bars
+	var on38 := euclid_onsets(3, 8)
+	var sparse_bars := [0, 1, 3, 5, 8]
+	var cache := {}
+	var r1: int = IDLE_RATES[1]
+	var q1 := q * r1 / 4000
+	for b in bars:
+		var notes: Array = cell.duplicate()
+		if word[b] == "B":
+			notes[2] = int(notes[2]) + 1
+		for k in 3:
+			var beat := float(b * B) + float(int(on38[k])) * 0.5
+			var d: int = notes[k]
+			var f := root_hz * idle_ratio(d)
+			var sparse: bool = k == 0 and sparse_bars.has(b)
+			var key := "p%.2f" % f
+			if not cache.has(key):
+				cache[key] = _idle_note("pluck", f, r1)
+			var vel := 0.85 + rng.randf() * 0.2
+			_idle_add(stems[1] if sparse else stems[2], cache[key], int(beat * q1), vel)
+			events.append({"stem": 1 if sparse else 2, "t0": beat, "t1": beat + 2.4 * sec_beats, "d": d})
+
+	# --- stem 3: soft high arpeggio shimmer on E(5,8) (rotated one step), chord tones an octave up
+	var on58 := euclid_onsets(5, 8)
+	var r3: int = IDLE_RATES[3]
+	var q3 := q * r3 / 4000
+	var apat := [0, 1, 2, 1, 2]
+	for b in bars:
+		var v: Array = voic[b]
+		for k in on58.size():
+			var beat := float(b * B) + float((int(on58[k]) + 1) % 8) * 0.5
+			var d: int = int(v[apat[k]]) + 5
+			var f := root_hz * idle_ratio(d)
+			var key := "g%.2f" % f
+			if not cache.has(key):
+				cache[key] = _idle_note("glass", f, r3)
+			_idle_add(stems[3], cache[key], int(beat * q3), 0.55 + 0.12 * float(k))
+			events.append({"stem": 3, "t0": beat, "t1": beat + 1.8 * sec_beats, "d": d})
+
+	# --- stem 4: warm bass pulse on beats 1 and 3 (E(2,4)), chord root an octave below
+	for b in bars:
+		var ch: Array = IDLE_PROG[b]
+		var d: int = int(ch[0]) - 5
+		var f := root_hz * idle_ratio(d)
+		var key := "b%.2f" % f
+		if not cache.has(key):
+			cache[key] = _idle_sustain(f, int(1.2 * 4000), 4000, 0.05, 0.8, 0.3, 1.8)
+		for beat in [0, 2]:
+			_idle_add(stems[4], cache[key], (b * B + beat) * q, 0.9 if beat == 0 else 0.6)
+			events.append({"stem": 4, "t0": float(b * B + beat), "t1": float(b * B + beat) + 2.0 * sec_beats, "d": d})
+
+	# --- stem 5: counter-melody: stepwise chord tones; A bars hold one long note, B bars (Fibonacci word) two
+	var r5: int = IDLE_RATES[5]
+	var q5 := q * r5 / 4000
+	var prev := 9
+	for b in bars:
+		var pcs: Array = IDLE_PROG[b]
+		var two: bool = word[b] == "B"
+		var d1 := _idle_nearest(prev, pcs, 8, 14, -999)
+		var bl: Array = [[d1, 0, 2 if two else 4]]
+		if two:
+			bl.append([_idle_nearest(d1, pcs, 8, 14, d1), 2, 2])
+		for nt in bl:
+			var f := root_hz * 0.5 * idle_ratio(int(nt[0]))
+			var key := "c%.2f_%d" % [f, int(nt[2])]
+			if not cache.has(key):
+				cache[key] = _idle_sustain(f, int(nt[2]) * q5, r5, 0.35, 0.9, 0.3, 0.0)
+			_idle_add(stems[5], cache[key], (b * B + int(nt[1])) * q5, 1.0)
+			events.append({"stem": 5, "t0": float(b * B + int(nt[1])), "t1": float(b * B + int(nt[1]) + int(nt[2])) + 0.9 * sec_beats, "d": int(nt[0])})
+			prev = int(nt[0])
+
+	# --- stem 6: choir-like pad: voice-led chord, three chorused voices, an octave below the pad
+	for b in bars:
+		_idle_chord(stems[6], root_hz, voic[b], -5, b * B * q - fade / 2, B * q + fade, fade, 4000, 1, wb)
+		for d in voic[b]:
+			events.append({"stem": 6, "t0": float(b * B) - 0.5, "t1": float(b * B + B) + 0.5, "d": int(d)})
+
+	for i in IDLE_STEMS:
+		_normalize(stems[i], IDLE_STEM_PEAK[i])
+	return {"stems": stems, "rates": IDLE_RATES, "n": n0, "bpm": 60.0 * float(nbeats) / (float(n0) / 4000.0), "bars": bars, "beats": B,
+		"cell": cell, "word": word, "voicings": voic, "events": events, "euclid": [3, 8], "root_hz": root_hz}
+
+
+## Linear-interpolating upsample of a stem to `out_rate` (for previews / tests).
+static func idle_upsample(buf: PackedFloat32Array, rate: int, out_rate := 16000) -> PackedFloat32Array:
+	if rate == out_rate:
+		return buf
+	var r := out_rate / rate
+	var n := buf.size()
+	var out := PackedFloat32Array()
+	out.resize(n * r)
+	for i in n:
+		var a := buf[i]
+		var d := (buf[(i + 1) % n] - a) / r
+		for k in r:
+			out[i * r + k] = a + d * k
+	return out
+
+
+## Full-loop 16 kHz mix of an idle bake at a (float) progress level.
+static func idle_mix(r: Dictionary, level: float) -> PackedFloat32Array:
+	var gs := idle_gains(level)
+	var out := PackedFloat32Array()
+	for i in IDLE_STEMS:
+		if gs[i] <= 0.0:
+			continue
+		var up := idle_upsample(r["stems"][i], IDLE_RATES[i])
+		if out.is_empty():
+			out.resize(up.size())
+		for k in up.size():
+			out[k] += up[k] * gs[i]
+	return out

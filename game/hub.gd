@@ -10,6 +10,7 @@ static var enabled := true            # tests switch audio off
 static var sfx_node: Node = null
 static var music_node: Node = null
 static var _pending_theme := ""
+static var _pending_progress := 0
 static var _installing := false
 static var codex_layer: CanvasLayer = null
 
@@ -47,6 +48,8 @@ static func _install(tree: SceneTree) -> void:
 		music_node = _make("res://game/music.gd", tree)
 		if music_node != null and _pending_theme != "":
 			music_node.call("set_theme", _pending_theme)
+			if _pending_theme == "idle" and music_node.has_method("set_progress"):
+				music_node.call("set_progress", _pending_progress)
 
 
 static func _make(path: String, tree: SceneTree) -> Node:
@@ -63,6 +66,23 @@ static func theme(theme_name: String) -> void:
 	_pending_theme = theme_name
 	if music_node != null and is_instance_valid(music_node) and music_node.has_method("set_theme"):
 		music_node.call("set_theme", theme_name)
+
+
+## Idle game background score: installs Music if needed, plays the calm "idle" theme at progress `level` (0..5).
+## No-op when audio is disabled / headless. Safe to call repeatedly (e.g. whenever the garden levels up).
+static func idle_music(level: int = 0) -> void:
+	_pending_theme = "idle"
+	_pending_progress = clampi(level, 0, 5)
+	if not enabled or DisplayServer.get_name() == "headless":
+		return
+	if music_node != null and is_instance_valid(music_node):
+		music_node.call("set_theme", "idle")
+		if music_node.has_method("set_progress"):
+			music_node.call("set_progress", _pending_progress)
+		return
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree != null:
+		audio(tree)      # installs on the next frame; _install applies the pending theme + progress
 
 
 static func tension(v: float) -> void:
@@ -112,9 +132,8 @@ class _CodexLayer extends CanvasLayer:
 		process_mode = Node.PROCESS_MODE_ALWAYS
 		ui = CodexUI.new()
 		add_child(ui)
-		book = _Book.new()
-		book.pressed_cb = toggle
-		add_child(book)
+		# the top-right book button was removed at the user's request; the codex stays on the C key
+		# (and will become a tab in the tab rail later)
 
 	func toggle() -> void:
 		if ui.is_open:

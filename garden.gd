@@ -13,7 +13,7 @@ const SPAN := 3.0                 # how far (in screen heights) the nearest laye
 const GROUND_Y := 0.80            # UV height of the line characters will stand on (mechanics hook)
 const FLY_TIME := 5.2
 # back to front; the shader layers use garden_<name>.gdshader. "fx" is the Node2D particle layer.
-const LAYERS := [["sky", 0.06], ["mid", 0.30], ["falls", 0.50], ["ground", 1.0], ["fx", 0.0], ["fg", 1.5]]
+const LAYERS := [["sky", 0.06], ["mid", 0.30], ["falls", 0.50], ["ground", 1.0], ["fx", 0.0], ["fg", 1.5], ["post", 0.0]]
 
 var mats: Dictionary = {}
 var cam := 0.0
