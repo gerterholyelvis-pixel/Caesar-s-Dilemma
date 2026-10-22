@@ -18,6 +18,7 @@ var fade := 0.0
 var _t := 0.0
 var _hot := 0.0
 var _busy := false
+var _mouse := Vector2(-999, -999)
 
 
 func _ready() -> void:
@@ -38,17 +39,19 @@ func _goblin_rect() -> Rect2:
 func _process(delta: float) -> void:
 	_t += delta
 	size = (get_parent() as Control).size
-	var over := not _busy and _goblin_rect().has_point(get_local_mouse_position())
+	var over := not _busy and _goblin_rect().has_point(_mouse)
 	_hot = move_toward(_hot, 1.0 if over else 0.0, delta * 4.0)
-	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if over else Control.CURSOR_ARROW
+	Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND if over else Input.CURSOR_ARROW)
 	queue_redraw()
 
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventMouse:
+		_mouse = make_input_local(event).position
 	if _busy or fade < 0.9:
 		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		if _goblin_rect().has_point(get_local_mouse_position()):
+		if _goblin_rect().has_point(_mouse):
 			_open_goblin()
 
 

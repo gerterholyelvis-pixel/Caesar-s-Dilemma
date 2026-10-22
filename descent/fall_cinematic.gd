@@ -9,6 +9,7 @@ class_name FallCinematic
 
 const DUR := 46.0
 const Audio := preload("res://descent/fall_audio.gd")
+const Score := preload("res://descent/fall_score.gd")
 const NOISE := 256
 const FADE_COL := Color(0.02, 0.015, 0.02)
 const T_CEIL := 36.5          # the moment we pass beneath the smoke ceiling
@@ -39,6 +40,8 @@ var _floor_y := 0.0
 var _cs: Cutscene
 var _player: AudioStreamPlayer
 var _thread: Thread
+var _sthread: Thread
+var _splayer: AudioStreamPlayer
 var _job := {"cancel": false}
 var _noise_tex: ImageTexture
 var _flashes := [10.3, 11.6, 12.4, 13.5, 17.2, 21.6, 29.4]
@@ -54,8 +57,6 @@ static func play(parent: Node) -> void:
 	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(c)
 	await c.run()
-	Hub.theme("")
-	Hub.tension(0.0)
 	if is_instance_valid(c):
 		c.queue_free()
 
@@ -63,14 +64,9 @@ static func play(parent: Node) -> void:
 func run() -> void:
 	var t0 := debug_t0
 	time = t0
-	# dramatic score: the "boss" theme (tritone + minor-second drone, driving polyrhythm) swells with the fall
-	# and is faded out for the last 2 s so the obsidian deep starts in silence
+	# the Limbo music fades out; the fall carries its own synthesised score (descent/fall_score.gd, variant letter shown faintly)
 	Hub.audio(get_tree())
-	Hub.theme("boss")
-	Hub.tension(0.25)
-	var mt := create_tween()
-	mt.tween_method(Hub.tension, 0.25, 1.0, (DUR - t0) * 0.8)
-	get_tree().create_timer(maxf(DUR - t0 - 2.0, 0.1)).timeout.connect(func() -> void: Hub.theme(""))
+	Hub.theme("")
 	_cs = Cutscene.new().bind(self)
 	_cs.tween(self, "time", DUR, DUR - t0, 0.0, Tween.TRANS_LINEAR, Tween.EASE_IN_OUT)
 	_cs.finished.connect(_stop_audio, CONNECT_ONE_SHOT)
@@ -162,8 +158,13 @@ func _ready() -> void:
 	_ready_done = true
 	_apply(time)
 	if not debug_noaudio:
+		Score.parse_cmdline()
+		Score.cancel = false
 		_thread = Thread.new()
 		_thread.start(_bake_audio)
+		_sthread = Thread.new()
+		_sthread.start(_bake_score.bind(Score.current))
+		_add_variant_tag()
 
 
 func _mat(path: String) -> ShaderMaterial:
@@ -382,6 +383,30 @@ func _bake_audio() -> AudioStreamWAV:
 	return Audio.bake(_job)
 
 
+func _bake_score(variant: int) -> AudioStreamWAV:
+	return Score.bake(variant, DUR + 0.5)
+
+
+## the score variant letter, tiny and faint in the bottom-left, gone after ~4 s
+func _add_variant_tag() -> void:
+	var l := Label.new()
+	l.text = Score.letter()
+	l.anchor_top = 1.0
+	l.anchor_bottom = 1.0
+	l.offset_left = 10.0
+	l.offset_top = -22.0
+	l.offset_bottom = -6.0
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	l.add_theme_font_size_override("font_size", 11)
+	l.add_theme_color_override("font_color", Color(0.85, 0.8, 0.75))
+	l.modulate.a = 0.4
+	add_child(l)
+	var tw := l.create_tween()
+	tw.tween_interval(3.0)
+	tw.tween_property(l, "modulate:a", 0.0, 1.0)
+	tw.tween_callback(l.queue_free)
+
+
 func _process(_d: float) -> void:
 	if _thread != null and _player == null and _thread.is_started() and not _thread.is_alive():
 		var st: AudioStreamWAV = _thread.wait_to_finish()
@@ -389,19 +414,35 @@ func _process(_d: float) -> void:
 		if st != null and not _job.cancel and is_inside_tree():
 			_player = AudioStreamPlayer.new()
 			_player.stream = st
-			_player.volume_db = -8.0
+			_player.volume_db = -15.0      # the baked effects sit under the score now
 			add_child(_player)
 			_player.play(clampf(time, 0.0, DUR - 0.1))
+	if _sthread != null and _splayer == null and _sthread.is_started() and not _sthread.is_alive():
+		var ss: AudioStreamWAV = _sthread.wait_to_finish()
+		_sthread = null
+		if ss != null and not Score.cancel and is_inside_tree():
+			_splayer = AudioStreamPlayer.new()
+			_splayer.stream = ss
+			_splayer.volume_db = -2.0
+			add_child(_splayer)
+			_splayer.play(clampf(time, 0.0, DUR - 0.1))
 
 
 func _stop_audio() -> void:
 	_job.cancel = true
+	Score.cancel = true
 	if _player != null and is_instance_valid(_player):
 		_player.stop()
+	if _splayer != null and is_instance_valid(_splayer):
+		_splayer.stop()
 
 
 func _exit_tree() -> void:
 	_job.cancel = true
+	Score.cancel = true
 	if _thread != null and _thread.is_started():
 		_thread.wait_to_finish()
 		_thread = null
+	if _sthread != null and _sthread.is_started():
+		_sthread.wait_to_finish()
+		_sthread = null

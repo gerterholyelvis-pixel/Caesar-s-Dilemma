@@ -81,6 +81,27 @@ func _ready() -> void:
 					"angel": angel, "sigil": sigil, "sigilfx": sigil_fx, "ambient": amb, "post": layer_nodes[4], "button": start_btn}.get(nm)
 				if n:
 					n.visible = false
+	# temporary dev shortcut: jump straight to the obsidian chamber
+	var skip := Button.new()
+	skip.text = "skip to chamber"
+	skip.flat = true
+	skip.focus_mode = Control.FOCUS_NONE
+	skip.add_theme_font_size_override("font_size", 13)
+	skip.add_theme_color_override("font_color", Color(0.85, 0.8, 0.7, 0.55))
+	skip.add_theme_color_override("font_hover_color", Color(1.0, 0.85, 0.5, 1.0))
+	skip.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	skip.offset_left = -170.0
+	skip.offset_top = -40.0
+	skip.offset_right = -14.0
+	skip.offset_bottom = -12.0
+	skip.pressed.connect(func(): get_tree().change_scene_to_file("res://descent/obsidian_scene.tscn"))
+	add_child(skip)
+	var fall_btn: Button = skip.duplicate()
+	fall_btn.text = "watch the fall"
+	fall_btn.offset_left = -340.0
+	fall_btn.offset_right = -180.0
+	fall_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://descent/fall_demo.tscn"))
+	add_child(fall_btn)
 	# test hook: `godot --path . -- --autostart` triggers the Start sequence by itself
 	if "--autostart" in OS.get_cmdline_user_args():
 		get_tree().create_timer(2.0).timeout.connect(_on_start)
