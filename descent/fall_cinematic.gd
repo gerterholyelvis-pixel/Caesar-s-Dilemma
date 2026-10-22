@@ -11,7 +11,11 @@ const DUR := 46.0
 const Audio := preload("res://descent/fall_audio.gd")
 const NOISE := 256
 const FADE_COL := Color(0.02, 0.015, 0.02)
-const T_CEIL := 35.5          # the moment we pass beneath the smoke ceiling
+const T_CEIL := 36.5          # the moment we pass beneath the smoke ceiling
+const VISTA_PITCH := 0.50
+const VISTA_DROP := 17.0
+const VT := [14.8, 18.8, 22.8, 26.6, 30.2, 33.4]            # vista stations: ribs, furnaces, face, facade, stairs+bridge, lava gargoyle
+const VYAW := [1.31, 0.45, -0.45, 0.35, -0.35, 0.2]
 
 ## test hooks (fall_demo): start at this time offset, skip audio
 static var debug_t0 := 0.0
@@ -37,8 +41,11 @@ var _player: AudioStreamPlayer
 var _thread: Thread
 var _job := {"cancel": false}
 var _noise_tex: ImageTexture
-var _flashes := [11.2, 13.9, 16.3, 18.0, 20.6]
+var _flashes := [10.3, 11.6, 12.4, 13.5, 17.2, 21.6, 29.4]
 var _cur := {}               # last camera state, for the angel overlay
+var _vy := PackedFloat32Array()
+var _va := PackedFloat32Array()
+var _yaw_keys: Array = []
 
 
 static func play(parent: Node) -> void:
@@ -71,6 +78,13 @@ func _ready() -> void:
 		y += Audio.speed_at(i * 0.02) * 0.02
 	_ceil_y = _y_at(T_CEIL)
 	_floor_y = _y_at(DUR) + 24.0
+	_yaw_keys = [[0.0, 0.0], [7.0, 0.15], [13.2, VYAW[0]]]
+	for k in VT.size():
+		_vy.append(_y_at(VT[k]) + VISTA_DROP)
+		_va.append(PI * 0.5 + VYAW[k])
+		_yaw_keys.append([VT[k] - 0.7, VYAW[k]])
+		_yaw_keys.append([VT[k] + 0.7, VYAW[k]])
+	_yaw_keys.append([DUR, VYAW[5] + 0.1])
 
 	var nz := FastNoiseLite.new()
 	nz.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
@@ -211,15 +225,15 @@ func _apply(t: float) -> void:
 	var spd: float = Audio.speed_at(t)
 	var vs := _vp.size
 	var flip := smoothstep(7.2, 13.8, t)
-	var phi := lerpf(-1.30, 1.0, flip) + 0.28 * smoothstep(30.0, 43.0, t) + 0.04 * sin(t * 0.7) * (1.0 - flip) + 0.035 * sin(t * 1.3) * flip
-	var roll := 0.30 * sin(PI * flip) + 0.035 * sin(t * 0.43) + 0.05 * sin(t * 0.17) * smoothstep(14.0, 30.0, t)
-	var yaw := 0.03 * t + 0.9 * flip
+	var phi := lerpf(-1.30, VISTA_PITCH, flip) + 0.45 * smoothstep(34.5, 44.0, t) + 0.04 * sin(t * 0.7) * (1.0 - flip) + 0.03 * sin(t * 1.3) * flip
+	var roll := 0.30 * sin(PI * flip) + 0.025 * sin(t * 0.43) + 0.03 * sin(t * 0.17) * smoothstep(14.0, 30.0, t)
+	var yaw := _kf(t, _yaw_keys) + 0.01 * sin(t * 0.8)
 	var calm := 1.0 - smoothstep(38.0, 44.0, t)
 	var sway := Vector2(sin(t * 0.37) * 1.7, cos(t * 0.29) * 1.3) * smoothstep(5.0, 16.0, t) * (0.3 + 0.7 * calm)
 	var sh_amt := (smoothstep(9.0, 36.0, t) * 0.9 + 0.12) * calm * (0.4 + 0.6 * smoothstep(0.0, 4.0, t))
 	var shk := Vector2(sin(t * 61.0) + sin(t * 97.0 + 1.0), sin(t * 73.0 + 2.0) + sin(t * 113.0)) * 0.0022 * sh_amt
-	var heat := _kf(t, [[0.0, 0.0], [9.0, 0.12], [16.0, 0.30], [24.0, 0.62], [32.0, 1.0], [40.0, 0.95], [46.0, 0.8]])
-	var fogd := _kf(t, [[0.0, 0.020], [8.0, 0.022], [11.0, 0.07], [14.0, 0.05], [18.0, 0.016], [26.0, 0.008], [36.0, 0.006], [46.0, 0.006]])
+	var heat := _kf(t, [[0.0, 0.0], [6.0, 0.0], [10.0, 0.25], [14.0, 0.45], [24.0, 0.62], [32.0, 1.0], [40.0, 0.95], [46.0, 0.8]])
+	var fogd := _kf(t, [[0.0, 0.020], [8.0, 0.022], [11.0, 0.034], [14.0, 0.026], [18.0, 0.013], [26.0, 0.011], [34.0, 0.010], [38.0, 0.007], [46.0, 0.006]])
 	var fog_x := exp(-pow((cy - _ceil_y) / 16.0, 2.0)) * 0.16
 	var lake := 1.0 - 0.96 * smoothstep(38.5, 44.5, t)
 	var expo := 1.0 - 0.80 * smoothstep(40.0, 45.5, t)
@@ -228,6 +242,12 @@ func _apply(t: float) -> void:
 	var flash := 0.0
 	for ft in _flashes:
 		flash = maxf(flash, exp(-(t - ft) * 9.0) * (1.0 if t >= ft else 0.0) * (0.7 + 0.3 * sin(t * 90.0)))
+	var bolt_a := 0.0
+	var bolt_s := 0.0
+	for ft in _flashes:
+		if t >= ft and t < ft + 0.32:
+			bolt_a = exp(-(t - ft) * 11.0) * (0.75 + 0.25 * sin(t * 140.0))
+			bolt_s = ft
 	var fl := 0.78
 	var aspect := vs.x / vs.y
 
@@ -246,7 +266,9 @@ func _apply(t: float) -> void:
 	m.set_shader_parameter("heat", heat)
 	m.set_shader_parameter("fogd", fogd)
 	m.set_shader_parameter("fog_extra", fog_x)
-	m.set_shader_parameter("struct_y0", 90.0)
+	m.set_shader_parameter("vY", _vy)
+	m.set_shader_parameter("vA", _va)
+	m.set_shader_parameter("chain_amt", (0.0 + 1.0 * maxf(exp(-pow((t - 18.8) / 2.6, 2.0)), exp(-pow((t - 33.4) / 2.4, 2.0)))) * smoothstep(13.0, 16.0, t) * (1.0 - smoothstep(35.0, 37.0, t)))
 	m.set_shader_parameter("ceilY", _ceil_y)
 	m.set_shader_parameter("floorY", _floor_y)
 	m.set_shader_parameter("lake", lake)
@@ -264,22 +286,26 @@ func _apply(t: float) -> void:
 	x.set_shader_parameter("fl", fl)
 	x.set_shader_parameter("res", vs)
 	x.set_shader_parameter("nadir", nad)
-	var look_down := smoothstep(0.2, 1.1, phi)
+	var look_down := smoothstep(-0.15, 0.35, phi)
 	x.set_shader_parameter("ember_amt", smoothstep(13.0, 20.0, t) * look_down * (1.0 - 0.9 * smoothstep(39.0, 44.0, t)))
 	x.set_shader_parameter("ash_amt", smoothstep(8.0, 12.0, t) * look_down * (1.0 - smoothstep(18.0, 30.0, t) * 0.7) * (1.0 - smoothstep(38.0, 44.0, t)))
 	x.set_shader_parameter("expo", expo)
+	x.set_shader_parameter("flash", flash)
+	x.set_shader_parameter("bolt_amt", bolt_a)
+	x.set_shader_parameter("bolt_x", fposmod(bolt_s * 0.37, 1.0) * 0.6 + 0.2)
+	x.set_shader_parameter("bolt_seed", bolt_s)
 
 	var p := _m_post
 	p.set_shader_parameter("T", t)
 	p.set_shader_parameter("heat", heat)
 	p.set_shader_parameter("shimmer", 0.0025 * smoothstep(12.0, 28.0, t) * (1.0 - smoothstep(38.0, 44.0, t)) * (0.4 + heat))
-	p.set_shader_parameter("blur", 0.006 + 0.022 * clampf(spd / 21.0, 0.0, 1.0) * smoothstep(8.0, 20.0, t) * look_down)
-	p.set_shader_parameter("aberr", 0.003 + 0.012 * clampf(spd / 21.0, 0.0, 1.0))
+	p.set_shader_parameter("blur", 0.003 + 0.030 * smoothstep(11.0, 16.0, spd) * smoothstep(8.0, 12.0, t) * look_down)
+	p.set_shader_parameter("aberr", 0.0015 + 0.010 * smoothstep(10.0, 16.0, spd))
 	p.set_shader_parameter("bloom", 0.35 + 0.25 * heat)
 	p.set_shader_parameter("vig", 0.62 + 0.25 * smoothstep(40.0, 46.0, t))
 	p.set_shader_parameter("grain", 0.05)
 	p.set_shader_parameter("aspect", aspect)
-	p.set_shader_parameter("center", Vector2(0.5, 0.5) + Vector2(nad.x / aspect, nad.y) * look_down)
+	p.set_shader_parameter("center", Vector2(0.5, 0.5) + (Vector2(nad.x / aspect, nad.y) * look_down).limit_length(0.8))
 
 	if debug_nopost:
 		p.set_shader_parameter("bloom", 0.0)

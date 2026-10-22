@@ -24,7 +24,7 @@ void fragment() {
 	vec2 nz = texture(noise_tex, uv * vec2(3.0, 4.0) + vec2(T * 0.05, -T * 0.35)).rg - 0.5;
 	uv += nz * shimmer * (0.4 + uv.y);
 	vec2 dir = uv - center;
-	float rr = length(dir * vec2(aspect, 1.0));
+	float rr = min(length(dir * vec2(aspect, 1.0)), 1.2);
 	vec3 col = vec3(0.0);
 	float wsum = 0.0;
 	for (int i = 0; i < 7; i++) {
@@ -42,12 +42,15 @@ void fragment() {
 	vec3 b = textureLod(scr, uv, 2.5).rgb * 0.30 + textureLod(scr, uv, 3.5).rgb * 0.30 + textureLod(scr, uv, 4.5).rgb * 0.25 + textureLod(scr, uv, 5.5).rgb * 0.2;
 	b = max(b - 0.10, 0.0);
 	col += b * bloom * vec3(1.0, 0.86, 0.72);
-	col = aces(col * 1.05);
+	col = aces(col * 0.95);
+	col = mix(col, col * col * (3.0 - 2.0 * col), 0.5);
+	col = max(col - 0.012, 0.0) * 1.012;
 	// grade: cold shadows, warm highlights, slight desaturation
 	float l = dot(col, vec3(0.299, 0.587, 0.114));
-	col = mix(vec3(l), col, 0.88);
-	col *= mix(vec3(0.92, 0.97, 1.05), vec3(1.06, 0.98, 0.9), smoothstep(0.0, 0.5, l));
-	float v = 1.0 - vig * pow(clamp(rr * 1.15, 0.0, 1.5), 2.2);
+	col = mix(vec3(l), col, 0.80);
+	col *= mix(vec3(0.82, 0.93, 1.14), vec3(1.08, 0.98, 0.86), smoothstep(0.0, 0.45, l));
+	float rv = length((SCREEN_UV - 0.5) * vec2(aspect, 1.0));
+	float v = 1.0 - vig * pow(clamp(rv * 1.15, 0.0, 1.5), 2.2);
 	col *= clamp(v, 0.34, 1.0);
 	float g = texture(noise_tex, SCREEN_UV * 11.0 + vec2(fract(T * 7.0) * 3.0, fract(T * 3.1))).r - 0.5;
 	col += g * grain;
