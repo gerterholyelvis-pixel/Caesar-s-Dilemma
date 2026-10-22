@@ -52,11 +52,13 @@ func _input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		if _goblin_rect().has_point(_mouse):
+			get_viewport().set_input_as_handled()
 			_open_goblin()
 
 
 func _open_goblin() -> void:
 	_busy = true
+	await get_tree().create_timer(0.35).timeout   # let the opening click pass so it cannot skip the cinematic
 	if ResourceLoader.exists("res://descent/goblin_cinematic.gd"):
 		var s: GDScript = load("res://descent/goblin_cinematic.gd")
 		await s.call("play", get_parent())
