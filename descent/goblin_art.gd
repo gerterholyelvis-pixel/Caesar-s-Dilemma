@@ -21,8 +21,27 @@ var mouth_glow := 0.0
 var cracks: Array = []          # {pts, t0, dur, w, ph}
 var facets: Array = []          # {pts, ang, ph}
 
+const BAKE_ORG := Vector2(-640.0, -360.0)
+const BAKE_SPAN := Vector2(1280.0, 1160.0)
+const BAKE_SCALE := 1.25
+const SH_BAKE := "res://descent/goblin_bake.gdshader"
+const SH_BUST := "res://descent/goblin_bust.gdshader"
+
+var _root: Node2D               # bust + dynamic face parts, carries the caller's camera transform
+var _bust: ColorRect
+var _dyn: Node2D
+var _vps: Array = []
+var _bake_mats: Array = []
+var _bust_mat: ShaderMaterial
+var _seg_tex: ImageTexture
+var _crack_dirty := true
+var _creating := false
+
 
 func build(crack_times: Array) -> void:
+	_crack_dirty = true
+	cracks.clear()
+	facets.clear()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 90210
 	# [origin, heading] - later cracks reach the eyes and mouth
@@ -64,7 +83,23 @@ func build(crack_times: Array) -> void:
 					break
 				bp.append(q)
 			if bp.size() >= 2:
-				cracks.append({"pts": bp, "t0": t0 + dur * float(b[0]) / float(pts.size()), "dur": 0.3 + bp.size() * 0.04, "w": 1.4, "ph": rng.randf() * 6.28})
+				var bt0: float = t0 + dur * float(b[0]) / float(pts.size())
+				var bdur: float = 0.3 + bp.size() * 0.04
+				cracks.append({"pts": bp, "t0": bt0, "dur": bdur, "w": 1.4, "ph": rng.randf() * 6.28})
+				# hairline twigs off the branches
+				for j in range(1, bp.size() - 1):
+					if rng.randf() < 0.45:
+						var tq: Vector2 = bp[j]
+						var ta: float = rng.randf() * TAU
+						var tp := PackedVector2Array([tq])
+						for _qq in rng.randi_range(2, 4):
+							ta += rng.randfn(0.0, 0.5)
+							tq += Vector2.from_angle(ta) * rng.randf_range(6.0, 12.0)
+							if not _inside(tq):
+								break
+							tp.append(tq)
+						if tp.size() >= 2:
+							cracks.append({"pts": tp, "t0": bt0 + bdur * float(j) / float(bp.size()), "dur": 0.25, "w": 0.9, "ph": rng.randf() * 6.28})
 	# glassy facets
 	var tries := 0
 	while facets.size() < 110 and tries < 3000:
@@ -167,9 +202,19 @@ func _blob(ci: CanvasItem, c: Vector2, r: Vector2, base: Color, k: float = 1.0, 
 func _tri(ci: CanvasItem, a: Vector2, b: Vector2, c: Vector2, base: Color, k: float = 1.0) -> void:
 	_lit_poly(ci, PackedVector2Array([a, b, c]), base, k)
 
-
 # --- backdrop: the other statues, almost swallowed by the dark -----------------------------------
+func _halo(ci: CanvasItem, c: Vector2, r: Vector2, col: Color, a: float, n: int = 16) -> void:
+	for i in n:
+		var f := float(i) / float(n)
+		var k := 1.0 - f
+		_ellipse(ci, c, r * (0.12 + 0.88 * k * k), Color(col.r, col.g, col.b, a / float(n) * (0.6 + 0.8 * f)))
+
+
 func draw_backdrop(ci: CanvasItem) -> void:
+	# a faint cold halo behind the skull separates black glass from the black void; warm floor-glow far below
+	_halo(ci, Vector2(40, -90), Vector2(640, 560), Color(0.07, 0.20, 0.32), 0.30)
+	_halo(ci, Vector2(0, -150), Vector2(260, 300), Color(0.10, 0.30, 0.42), 0.13)
+	_halo(ci, Vector2(-240, 640), Vector2(980, 340), Color(0.95, 0.24, 0.04), 0.16 * lit)
 	for s: float in [-1.0, 1.0]:
 		var x: float = s * 1250.0
 		var pts := PackedVector2Array([Vector2(x - 150, 900), Vector2(x - 120, 100), Vector2(x - 60, -140), Vector2(x, -230),
@@ -179,128 +224,140 @@ func draw_backdrop(ci: CanvasItem) -> void:
 			var side := -s * clampf((p.x - x) / 150.0, -1.0, 1.0)     # inner edge catches the glow
 			var c := Color(0.006, 0.006, 0.009)
 			c += EMBER * (clampf(side, 0.0, 1.0) * 0.06 * lit)
+			c += Color(0.10, 0.22, 0.32) * (clampf(-side, 0.0, 1.0) * 0.012)
 			c.a = 1.0
 			cols.append(c)
 		ci.draw_polygon(pts, cols)
+		ci.draw_polyline(PackedVector2Array([pts[1], pts[2], pts[3], pts[4], pts[5]]), Color(0.10, 0.22, 0.32, 0.10), 2.0)
 	# far pillars
 	for i in 6:
 		var x := -2400.0 + i * 960.0 + 120.0 * sin(i * 2.7)
-		ci.draw_rect(Rect2(x, -900, 70 + 20 * (i % 3), 2200), Color(0.008, 0.008, 0.012))
+		var w := 70.0 + 20.0 * (i % 3)
+		ci.draw_rect(Rect2(x, -900, w, 2200), Color(0.008, 0.008, 0.012))
+		ci.draw_rect(Rect2(x + w - 3.0, -900, 3.0, 2200), Color(0.04, 0.10, 0.15, 0.7))
 
 
-# --- the bust ----------------------------------------------------------------------------------
+# --- the bust: a baked sculpt (goblin_bake.gdshader) lit every frame (goblin_bust.gdshader) -------------
+func _find_xf(ci: Node) -> Transform2D:
+	var n := ci
+	while n != null:
+		var v: Variant = n.get("_xf")
+		if v is Transform2D:
+			return v
+		n = n.get_parent()
+	return Transform2D.IDENTITY
+
+
+func _ensure(ci: CanvasItem) -> bool:
+	if _root != null and is_instance_valid(_root) and _root.get_parent() == ci:
+		return true
+	if _creating:
+		return false
+	_creating = true
+	_create.call_deferred(ci)
+	return false
+
+
+func _create(ci: CanvasItem) -> void:
+	_creating = false
+	if not is_instance_valid(ci) or not ci.is_inside_tree():
+		return
+	_root = Node2D.new()
+	_root.name = "GoblinBust"
+	ci.add_child(_root)
+	var sz := Vector2i((BAKE_SPAN * BAKE_SCALE).round())
+	var bake_shader: Shader = load(SH_BAKE)
+	_vps.clear()
+	_bake_mats.clear()
+	for i in 4:
+		var vp := SubViewport.new()
+		vp.size = sz
+		vp.transparent_bg = true
+		vp.disable_3d = true
+		vp.msaa_2d = Viewport.MSAA_DISABLED
+		var cr := ColorRect.new()
+		cr.set_anchors_preset(Control.PRESET_FULL_RECT)
+		cr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var m := ShaderMaterial.new()
+		m.shader = bake_shader
+		m.set_shader_parameter("pass_id", i)
+		m.set_shader_parameter("org", BAKE_ORG)
+		m.set_shader_parameter("span", BAKE_SPAN)
+		cr.material = m
+		vp.add_child(cr)
+		_root.add_child(vp)
+		vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+		_vps.append(vp)
+		_bake_mats.append(m)
+	_bust = ColorRect.new()
+	_bust.position = BAKE_ORG
+	_bust.size = BAKE_SPAN
+	_bust.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bust_mat = ShaderMaterial.new()
+	_bust_mat.shader = load(SH_BUST)
+	_bust_mat.set_shader_parameter("tex_a", _vps[0].get_texture())
+	_bust_mat.set_shader_parameter("tex_b", _vps[1].get_texture())
+	_bust_mat.set_shader_parameter("tex_c", _vps[2].get_texture())
+	_bust_mat.set_shader_parameter("tex_d", _vps[3].get_texture())
+	_bust_mat.set_shader_parameter("tex_n", _make_noise())
+	_bust_mat.set_shader_parameter("org", BAKE_ORG)
+	_bust_mat.set_shader_parameter("span", BAKE_SPAN)
+	_bust.material = _bust_mat
+	_root.add_child(_bust)
+	_dyn = Node2D.new()
+	_dyn.draw.connect(_draw_dyn)
+	_root.add_child(_dyn)
+	_crack_dirty = true
+	_upload_cracks()
+
+
+## crack polylines -> a float segment texture the bake shader turns into a distance + arrival-time field
+func _upload_cracks() -> void:
+	_crack_dirty = false
+	if _vps.size() < 3:
+		return
+	var segs: Array = []
+	for c in cracks:
+		var pts: PackedVector2Array = c.pts
+		var n := pts.size() - 1
+		var cls := clampf((float(c.w) - 1.0) / 1.6, 0.0, 1.0)
+		for k in n:
+			segs.append([pts[k], pts[k + 1], float(c.t0) + float(c.dur) * float(k) / float(n), float(c.t0) + float(c.dur) * float(k + 1) / float(n), cls])
+	var ns := maxi(segs.size(), 1)
+	var img := Image.create(ns * 2, 1, false, Image.FORMAT_RGBAF)
+	for i in segs.size():
+		var s: Array = segs[i]
+		var a: Vector2 = s[0]
+		var b: Vector2 = s[1]
+		img.set_pixel(i * 2, 0, Color(a.x, a.y, b.x, b.y))
+		img.set_pixel(i * 2 + 1, 0, Color(s[2], s[3], s[4], 0.0))
+	_seg_tex = ImageTexture.create_from_image(img)
+	var m: ShaderMaterial = _bake_mats[2]
+	m.set_shader_parameter("seg_tex", _seg_tex)
+	m.set_shader_parameter("nseg", segs.size())
+	var vp: SubViewport = _vps[2]
+	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+
+
 func draw_bust(ci: CanvasItem) -> void:
-	var skin := BASE
-	# torso + arms
-	_lit_poly(ci, PackedVector2Array([Vector2(-130, 220), Vector2(-300, 270), Vector2(-470, 380), Vector2(-540, 700),
-		Vector2(540, 700), Vector2(470, 380), Vector2(300, 270), Vector2(130, 220)]), skin, 0.35)
-	_blob(ci, Vector2(-300, 420), Vector2(160, 230), skin, 0.3, 0.35)
-	_blob(ci, Vector2(300, 420), Vector2(160, 230), skin, 0.3, -0.35)
-	# tattered collar: jagged hood rim
-	var rim := PackedVector2Array()
-	for i in 15:
-		var u := float(i) / 14.0
-		rim.append(Vector2(lerpf(-250, 250, u), 292 + 40.0 * sin(u * PI) - 14.0 * (i % 2) + 6.0 * sin(u * 31.0)))
-	ci.draw_polyline(rim, _shade(Vector2(0, 300), Vector2(0, -1), Color(0.05, 0.045, 0.06), 0.8), 6.0)
-	# neck
-	_blob(ci, Vector2(0, 245), Vector2(125, 115), skin, 1.0)
-	# ears (long, pointed, slightly drooped) with inner hollow
-	for s: float in [-1.0, 1.0]:
-		var ear := PackedVector2Array([Vector2(s * 175, -110), Vector2(s * 260, -190), Vector2(s * 340, -240), Vector2(s * 485, -262),
-			Vector2(s * 430, -150), Vector2(s * 350, -70), Vector2(s * 262, 8), Vector2(s * 190, 36)])
-		_lit_poly(ci, ear, skin, 1.1)
-		var inner := PackedVector2Array([Vector2(s * 205, -85), Vector2(s * 290, -168), Vector2(s * 415, -232), Vector2(s * 372, -130),
-			Vector2(s * 292, -52), Vector2(s * 218, 4)])
-		_lit_poly(ci, inner, Color(0.006, 0.006, 0.01), 0.5)
-		# cartilage ridges
-		for j in 3:
-			var a := Vector2(s * (230 + j * 40), -100 + j * 8)
-			var b := Vector2(s * (340 + j * 25), -190 + j * 30)
-			ci.draw_line(a, b, Color(0.0, 0.0, 0.0, 0.7), 3.0)
-	# skull
-	_blob(ci, Vector2(0, -30), Vector2(206, 242), skin, 1.0, 0.0, 30)
-	# forehead bumps
-	_blob(ci, Vector2(-88, -168), Vector2(66, 44), skin, 0.9, 0.2)
-	_blob(ci, Vector2(88, -168), Vector2(66, 44), skin, 0.9, -0.2)
-	# cheekbones
-	_blob(ci, Vector2(-122, 38), Vector2(78, 54), skin, 1.0, 0.5)
-	_blob(ci, Vector2(122, 38 - smirk * 18.0), Vector2(78, 54), skin, 1.0, -0.5)
-	# cheek mass
-	_blob(ci, Vector2(-108, 120), Vector2(72, 70), skin, 0.9)
-	_blob(ci, Vector2(108, 120 - smirk * 26.0), Vector2(72 + smirk * 8.0, 70 - smirk * 12.0), skin, 0.9)
-	# jaw + pointed chin
-	_lit_poly(ci, PackedVector2Array([Vector2(-150, 70), Vector2(-132, 160), Vector2(-96, 214), Vector2(-40, 266), Vector2(0, 284),
-		Vector2(40, 266), Vector2(96, 214), Vector2(132, 160), Vector2(150, 70), Vector2(0, 60)]), skin, 1.0)
-	_blob(ci, Vector2(0, 236), Vector2(46, 34), skin, 1.1)
-	# eye sockets
-	for s: float in [-1.0, 1.0]:
-		_blob(ci, Vector2(s * 92, -46), Vector2(74, 42), Color(0.002, 0.002, 0.004), 0.25, s * 0.18)
-	# nose
-	_lit_poly(ci, PackedVector2Array([Vector2(-26, -76), Vector2(26, -76), Vector2(42, 8), Vector2(-42, 8)]), skin, 1.0)
-	_blob(ci, Vector2(0, 54), Vector2(56, 62), skin, 1.2)
-	_blob(ci, Vector2(-42, 72), Vector2(28, 25), skin, 1.0, 0.4)
-	_blob(ci, Vector2(42, 72), Vector2(28, 25), skin, 1.0, -0.4)
-	_blob(ci, Vector2(0, 92), Vector2(26, 14), skin, 1.2)
-	for s: float in [-1.0, 1.0]:
-		_blob(ci, Vector2(s * 22, 88), Vector2(12, 8), Color(0.0, 0.0, 0.0), 0.0, s * 0.4, 10)
-	# warts
-	for w in [Vector2(-18, 40), Vector2(30, 62), Vector2(-138, 92), Vector2(60, -150), Vector2(150, 112)]:
-		_blob(ci, w, Vector2(9, 8), skin, 1.4, 0.0, 10)
-	# brow ridge: heavy V of stone
-	_lit_poly(ci, PackedVector2Array([Vector2(-208, -82), Vector2(-140, -132), Vector2(-60, -116), Vector2(0, -88), Vector2(60, -116), Vector2(140, -132),
-		Vector2(208, -82), Vector2(150, -58), Vector2(60, -82), Vector2(0, -52), Vector2(-60, -82), Vector2(-150, -58)]), skin, 1.3)
-	# eyes
-	for s: float in [-1.0, 1.0]:
-		_draw_eye(ci, s)
-	# upper lid shadow ledge
-	for s: float in [-1.0, 1.0]:
-		ci.draw_line(Vector2(s * 40, -62), Vector2(s * 150, -80), Color(0, 0, 0, 0.8), 6.0)
-	# mouth
-	_draw_mouth(ci)
-	# wrinkles
-	var wr := Color(0.0, 0.0, 0.0, 0.7)
-	var hi := _shade(Vector2(0, 40), Vector2(0, 1), Color(0.03, 0.03, 0.04), 0.6)
-	hi.a = 0.5
-	for k in 3:
-		var y := -150.0 - k * 17.0
-		var pw := PackedVector2Array()
-		for i in 11:
-			var u := float(i) / 10.0
-			pw.append(Vector2(lerpf(-130, 130, u), y - 12.0 * sin(u * PI) + 3.0 * sin(u * 23.0 + k)))
-		ci.draw_polyline(pw, wr, 2.2)
-		ci.draw_polyline(pw + PackedVector2Array(_fill_v(pw.size(), Vector2(0, 3))), hi, 1.2)
-	for s: float in [-1.0, 1.0]:
-		var nl := PackedVector2Array([Vector2(s * 56, 58), Vector2(s * 84, 94), Vector2(s * 112, 136 - smirk * 22.0), Vector2(s * 128, 160 - smirk * 40.0)])
-		ci.draw_polyline(nl, wr, 3.0)
-		ci.draw_polyline(nl + PackedVector2Array(_fill_v(4, Vector2(s * 3, 3))), hi, 1.5)
-		ci.draw_polyline(PackedVector2Array([Vector2(s * 70, -20), Vector2(s * 96, 8), Vector2(s * 118, 18)]), wr, 2.0)
-	# glass facets: planes catching the ember
-	for i in facets.size():
-		var f: Dictionary = facets[i]
-		var n := Vector2.from_angle(f.ang)
-		var c: Vector2 = (f.pts[0] + f.pts[1] + f.pts[2]) / 3.0
-		var ld := (lpos - c).normalized()
-		var fc := clampf(n.dot(ld), 0.0, 1.0)
-		var tw := 0.75 + 0.25 * sin(t * (1.3 + fmod(f.ph, 1.0)) + f.ph)
-		var a := (0.015 + 0.16 * pow(fc, 2.0)) * lit * tw * clampf(1.25 - c.distance_to(lpos) / 950.0, 0.1, 1.0)
-		var col := Color(EMBER.r, EMBER.g * 0.8, EMBER.b * 0.7, a)
-		ci.draw_colored_polygon(f.pts, col)
-		ci.draw_polyline(PackedVector2Array([f.pts[0], f.pts[1], f.pts[2], f.pts[0]]), Color(0, 0, 0, 0.35), 1.2)
-	# pendant coin on a cord
-	ci.draw_polyline(PackedVector2Array([Vector2(-72, 240), Vector2(-40, 330), Vector2(0, 356)]), Color(0.01, 0.01, 0.012), 4.0)
-	ci.draw_polyline(PackedVector2Array([Vector2(72, 240), Vector2(40, 330), Vector2(0, 356)]), Color(0.01, 0.01, 0.012), 4.0)
-	_blob(ci, Vector2(0, 396), Vector2(50, 50), Color(0.02, 0.02, 0.03), 1.4, 0.0, 28)
-	var ring := _shade(Vector2(0, 396), Vector2(-0.5, 0.8), Color(0.04, 0.04, 0.05), 1.3)
-	ci.draw_arc(Vector2(0, 396), 38.0, 0.0, TAU, 28, ring, 3.0)
-	ci.draw_polyline(PackedVector2Array([Vector2(-16, 410), Vector2(-16, 384), Vector2(0, 396), Vector2(16, 384), Vector2(16, 410)]), ring, 3.0)
-	# earring coin in the left ear
-	ci.draw_arc(Vector2(-222, 62), 20.0, 0.0, TAU, 20, _shade(Vector2(-222, 62), Vector2(0, 1), Color(0.04, 0.04, 0.05), 1.5), 4.0)
-	# top light: a faint cold line along the skull
-	var topl := PackedVector2Array()
-	for i in 21:
-		var a := lerpf(PI * 1.12, PI * 1.88, float(i) / 20.0)
-		topl.append(Vector2(cos(a) * 205.0, -30.0 + sin(a) * 242.0))
-	ci.draw_polyline(topl, Color(0.3, 0.4, 0.6, 0.10 * (0.4 + 0.6 * lit)), 3.0)
+	if not _ensure(ci):
+		return
+	if _crack_dirty:
+		_upload_cracks()
+	var xf := _find_xf(ci)
+	_root.transform = xf
+	var px := 1.0 / maxf(xf.get_scale().x, 0.01)
+	var m := _bust_mat
+	m.set_shader_parameter("T", t)
+	m.set_shader_parameter("lit", lit)
+	m.set_shader_parameter("lpos", lpos)
+	m.set_shader_parameter("hot", hot)
+	m.set_shader_parameter("crack_heat", crack_heat)
+	m.set_shader_parameter("eye", eye)
+	m.set_shader_parameter("smirk", smirk)
+	m.set_shader_parameter("mouth_glow", mouth_glow)
+	m.set_shader_parameter("px", px)
+	_dyn.queue_redraw()
 
 
 func _fill_v(n: int, v: Vector2) -> Array:
@@ -310,113 +367,286 @@ func _fill_v(n: int, v: Vector2) -> Array:
 	return a
 
 
+func _hc(c: Color, k: float) -> Color:
+	return Color(c.r * k, c.g * k, c.b * k, c.a)
+
+
+# --- eyes ------------------------------------------------------------------------------------
+func _almond(E: Vector2, s: float, w: float, up: float, dn: float, n: int = 13) -> PackedVector2Array:
+	var pts := PackedVector2Array()
+	for i in n:
+		var u := lerpf(-1.0, 1.0, float(i) / float(n - 1))
+		pts.append(E + Vector2(u * w, -u * s * 10.0 - up * pow(maxf(1.0 - u * u, 0.0), 0.8)))
+	for i in n:
+		var u := lerpf(1.0, -1.0, float(i) / float(n - 1))
+		pts.append(E + Vector2(u * w, -u * s * 10.0 + dn * pow(maxf(1.0 - u * u, 0.0), 0.8)))
+	return pts
+
+
 func _draw_eye(ci: CanvasItem, s: float) -> void:
 	var E := Vector2(s * 92.0, -46.0)
+	var ember := minf(lit, 1.2)
 	if eye < 0.03:
-		# closed: carved slit, a fleck of amber bleeding through
-		ci.draw_line(E + Vector2(-48, 4), E + Vector2(48, -4 + 8 * s * 0.0), Color(0, 0, 0, 0.95), 6.0)
-		ci.draw_line(E + Vector2(-46, 7), E + Vector2(46, 3), _shade(E, Vector2(0, 1), Color(0.03, 0.03, 0.04), 1.0), 2.0)
+		# closed: a carved slit with a chipped lip, a thread of ember leaking through
+		var slit := _almond(E, s, 50.0, 2.6, 2.6, 11)
+		ci.draw_colored_polygon(slit, Color(0.0, 0.0, 0.0, 0.97))
+		var lo := PackedVector2Array()
+		var hi := PackedVector2Array()
+		for i in 11:
+			var u := lerpf(-1.0, 1.0, float(i) / 10.0)
+			lo.append(E + Vector2(u * 51.0, -u * s * 10.0 + 4.5 * pow(maxf(1.0 - u * u, 0.0), 0.8)))
+			hi.append(E + Vector2(u * 51.0, -u * s * 10.0 - 4.5 * pow(maxf(1.0 - u * u, 0.0), 0.8)))
+		var rc := _shade(E + Vector2(0, 6), Vector2(0, 1), Color(0.03, 0.03, 0.04), 1.6)
+		rc.a = 0.9
+		ci.draw_polyline(lo, rc, 1.6)
+		ci.draw_polyline(hi, Color(0.0, 0.0, 0.0, 0.8), 2.4)
+		var leak := clampf(hot * 1.2 + crack_heat * 0.2, 0.0, 1.0) * (0.55 + 0.45 * sin(t * 2.3 + s))
+		if leak > 0.02:
+			var core := PackedVector2Array()
+			for i in 9:
+				var u := lerpf(-0.7, 0.7, float(i) / 8.0)
+				core.append(E + Vector2(u * 50.0, -u * s * 10.0))
+			ci.draw_polyline(core, Color(2.4, 0.9, 0.2, 0.45 * leak), 1.2)
 		return
-	var outer := PackedVector2Array()
-	var inner := PackedVector2Array()
-	var cols_o := PackedColorArray()
-	var cols_i := PackedColorArray()
-	for k in 2:
-		var pts := PackedVector2Array()
-		var sc := 1.0 if k == 0 else 0.62
-		for i in 13:
-			var u := lerpf(-1.0, 1.0, float(i) / 12.0)
-			var yo := -u * s * 10.0
-			pts.append(E + Vector2(u * 54.0 * sc, yo - 23.0 * eye * sc * pow(1.0 - u * u, 0.8)))
-		for i in 13:
-			var u := lerpf(1.0, -1.0, float(i) / 12.0)
-			var yo := -u * s * 10.0
-			pts.append(E + Vector2(u * 54.0 * sc, yo + 15.0 * eye * sc * pow(1.0 - u * u, 0.8)))
-		if k == 0:
-			outer = pts
-		else:
-			inner = pts
-	for i in outer.size():
-		cols_o.append(Color(1.3, 0.22, 0.03))
-	for i in inner.size():
-		cols_i.append(Color(3.4, 2.0, 0.6))
-	ci.draw_polygon(outer, cols_o)
-	ci.draw_polygon(inner, cols_i)
+	# --- open ---
+	var W := 56.0
+	var up := 24.0 * eye
+	var dn := 15.0 * eye
+	# socket shadow so the eyeball reads as inset
+	ci.draw_colored_polygon(_almond(E, s, W + 7.0, up + 7.0, dn + 5.0), Color(0.0, 0.0, 0.0, 0.85))
+	# eyeball: concentric rings, dark rim to white-hot core
+	var ring_cols := [Color(0.75, 0.10, 0.02), Color(1.6, 0.26, 0.04), Color(2.6, 0.8, 0.14), Color(3.4, 1.7, 0.45), Color(4.2, 3.0, 1.4)]
+	var ring_sc := [1.0, 0.86, 0.66, 0.44, 0.22]
+	for k in 5:
+		var sc: float = ring_sc[k]
+		ci.draw_colored_polygon(_almond(E, s, W * sc, up * sc, dn * sc), ring_cols[k])
+	# radial iris striations
+	for i in 16:
+		var a := TAU * (float(i) + 0.5) / 16.0
+		var d0 := Vector2(cos(a) * 9.0, sin(a) * 8.0 * eye)
+		var d1 := Vector2(cos(a) * W * 0.78, sin(a) * 17.0 * eye)
+		ci.draw_line(E + d0, E + d1, Color(0.35, 0.04, 0.0, 0.33), 1.1)
 	# slit pupil
-	var pr := Vector2(3.0 + 3.0 * eye, 19.0 * eye)
+	var pr := Vector2(2.6 + 3.2 * eye, 19.0 * eye)
 	var pp := PackedVector2Array()
-	for i in 14:
-		var a := TAU * i / 14.0
+	for i in 16:
+		var a := TAU * i / 16.0
 		pp.append(E + Vector2(cos(a) * pr.x, sin(a) * pr.y))
-	ci.draw_colored_polygon(pp, Color(0.02, 0.0, 0.0))
+	ci.draw_colored_polygon(pp, Color(0.012, 0.0, 0.0))
+	# lids: heavy brow-side lid with a shadow cast on the eye, thin wet lower lid
+	var lid := PackedVector2Array()
+	var lidc := PackedColorArray()
+	for i in 13:
+		var u := lerpf(-1.0, 1.0, float(i) / 12.0)
+		var p0 := E + Vector2(u * (W + 7.0), -u * s * 10.0 - (up + 2.0) * pow(maxf(1.0 - u * u, 0.0), 0.8))
+		lid.append(p0)
+		lidc.append(Color(0.0, 0.0, 0.0, 0.0))
+	for i in 13:
+		var u := lerpf(1.0, -1.0, float(i) / 12.0)
+		var p1 := E + Vector2(u * (W + 7.0), -u * s * 10.0 - (up + 16.0) * pow(maxf(1.0 - u * u, 0.0), 0.8) - 6.0)
+		lid.append(p1)
+		lidc.append(Color(0.0, 0.0, 0.0, 1.0))
+	# the lid polygon is drawn as two strips for a soft inner edge
+	for i in 12:
+		var j := 25 - i
+		var q := PackedVector2Array([lid[i], lid[i + 1], lid[j - 1], lid[j]])
+		var qc := PackedColorArray([Color(0, 0, 0, 0.9), Color(0, 0, 0, 0.9), Color(0, 0, 0, 1.0), Color(0, 0, 0, 1.0)])
+		ci.draw_polygon(q, qc)
+	var shade := PackedVector2Array()
+	var shc := PackedColorArray()
+	for i in 13:
+		var u := lerpf(-1.0, 1.0, float(i) / 12.0)
+		shade.append(E + Vector2(u * W * 0.98, -u * s * 10.0 - up * pow(maxf(1.0 - u * u, 0.0), 0.8)))
+		shc.append(Color(0, 0, 0, 0.80))
+	for i in 13:
+		var u := lerpf(1.0, -1.0, float(i) / 12.0)
+		shade.append(E + Vector2(u * W * 0.9, -u * s * 10.0 - up * 0.2 * pow(maxf(1.0 - u * u, 0.0), 0.8) + 1.0))
+		shc.append(Color(0, 0, 0, 0.0))
+	for i in 12:
+		var j := 25 - i
+		ci.draw_polygon(PackedVector2Array([shade[i], shade[i + 1], shade[j - 1], shade[j]]), PackedColorArray([shc[i], shc[i + 1], shc[j - 1], shc[j]]))
+	# rim highlights on the lids
+	var rl := _shade(E + Vector2(0, 12), Vector2(0, 1), Color(0.03, 0.03, 0.04), 1.8)
+	var lw := PackedVector2Array()
+	var uw := PackedVector2Array()
+	for i in 13:
+		var u := lerpf(-1.0, 1.0, float(i) / 12.0)
+		lw.append(E + Vector2(u * W, -u * s * 10.0 + dn * pow(maxf(1.0 - u * u, 0.0), 0.8) + 1.5))
+		uw.append(E + Vector2(u * (W + 1.0), -u * s * 10.0 - (up + 1.0) * pow(maxf(1.0 - u * u, 0.0), 0.8)))
+	ci.draw_polyline(lw, Color(rl.r, rl.g, rl.b, 0.9), 2.0)
+	ci.draw_polyline(uw, Color(0.25, 0.45, 0.65, 0.35 * eye), 1.4)
+	# wet catch-lights: cold softbox, warm ember
+	ci.draw_circle(E + Vector2(s * -15.0 + 12.0, -8.0 * eye - 3.0), 3.6, Color(2.2, 2.6, 3.0, 0.95 * eye))
+	ci.draw_circle(E + Vector2(s * 9.0, 6.0 * eye), 2.0, Color(3.0, 1.6, 0.6, 0.8 * eye * ember))
 
 
+# --- mouth -----------------------------------------------------------------------------------
 func _mouth_y(u: float, my: float, sm: float) -> float:
 	var c := lerpf(0.55, -0.9, sm)
 	return my + c * u * u * 28.0 - sm * 18.0 * u
 
 
+## one modelled tooth: two lit halves with a ridge between, dark at the gum, ember / cold rim light, optional chipped tip
+func _tooth(ci: CanvasItem, root: Vector2, dir: Vector2, ln: float, wd: float, bend: float, chip: float = 0.0) -> void:
+	var perp := Vector2(-dir.y, dir.x)
+	var b0 := root - perp * wd * 0.5
+	var b1 := root + perp * wd * 0.5
+	var tip := root + dir * ln + perp * bend
+	if chip > 0.0:
+		tip = root + dir * ln * (1.0 - chip) + perp * bend * 0.6
+	var m0 := root - perp * wd * 0.44 + dir * ln * 0.46 + perp * bend * 0.45
+	var m1 := root + perp * wd * 0.44 + dir * ln * 0.46 + perp * bend * 0.45
+	var ld := (lpos - root).normalized()
+	var fl := clampf(ld.dot(-perp) * 0.5 + 0.5, 0.0, 1.0)
+	var fr := clampf(ld.dot(perp) * 0.5 + 0.5, 0.0, 1.0)
+	var li := minf(lit, 1.2)
+	var bone := Color(0.62, 0.56, 0.46)
+	var glow := EMBER * (mouth_glow * 0.10)
+	var cl := _hc(bone, 0.16 + 1.0 * fl * fl) + EMBER * (pow(fl, 3.0) * 0.30 * li) + glow
+	var cr := _hc(bone, 0.16 + 1.0 * fr * fr) + EMBER * (pow(fr, 3.0) * 0.30 * li) + glow
+	cl.a = 1.0
+	cr.a = 1.0
+	var root_c := Color(0.025, 0.014, 0.012) + glow * 0.6
+	root_c.a = 1.0
+	var mid_c := _hc(bone, 0.10) + glow * 0.5
+	mid_c.a = 1.0
+	var tipcol_l := cl * 1.12
+	var tipcol_r := cr * 1.12
+	tipcol_l.a = 1.0
+	tipcol_r.a = 1.0
+	var rc := root
+	if chip > 0.0:
+		var t0 := tip - perp * wd * 0.12
+		var t1 := tip + perp * wd * 0.12
+		ci.draw_polygon(PackedVector2Array([b0, m0, t0, rc]), PackedColorArray([root_c, cl, tipcol_l, mid_c]))
+		ci.draw_polygon(PackedVector2Array([rc, t0, t1, b1]), PackedColorArray([mid_c, tipcol_r, tipcol_r, root_c]))
+		ci.draw_polygon(PackedVector2Array([rc, t0, t1, m1, b1]), PackedColorArray([mid_c, tipcol_r, tipcol_r, cr, root_c]))
+	else:
+		ci.draw_polygon(PackedVector2Array([b0, m0, tip, rc]), PackedColorArray([root_c, cl, tipcol_l, mid_c]))
+		ci.draw_polygon(PackedVector2Array([rc, tip, m1, b1]), PackedColorArray([mid_c, tipcol_r, cr, root_c]))
+	# outline, ember rim on the ember side, cold rim on the other
+	ci.draw_polyline(PackedVector2Array([b0, m0, tip, m1, b1]), Color(0.0, 0.0, 0.0, 0.85), 1.3)
+	var warm := Color(1.9, 0.6, 0.15, 0.75 * li * pow(maxf(fl, fr), 2.0))
+	if fl >= fr:
+		ci.draw_polyline(PackedVector2Array([b0 + dir * 2.0, m0, tip]), warm, 1.2)
+		ci.draw_polyline(PackedVector2Array([m1, tip]), Color(0.35, 0.65, 0.95, 0.14), 1.0)
+	else:
+		ci.draw_polyline(PackedVector2Array([b1 + dir * 2.0, m1, tip]), warm, 1.2)
+		ci.draw_polyline(PackedVector2Array([m0, tip]), Color(0.35, 0.65, 0.95, 0.14), 1.0)
+	# centre ridge and a hairline crack on some teeth
+	ci.draw_line(rc + dir * ln * 0.15, tip - dir * ln * 0.08, Color(0.0, 0.0, 0.0, 0.35), 1.0)
+
+
+func _hf(k: int, salt: float = 0.0) -> float:
+	return fposmod(sin(float(k) * 12.9898 + salt * 78.233) * 43758.5453, 1.0)
+
+
 func _draw_mouth(ci: CanvasItem) -> void:
-	var my := 168.0
-	var W := 132.0
-	var N := 17
+	var my := 170.0
+	var W := 142.0 + smirk * 18.0
+	var N := 25
 	var up := PackedVector2Array()
 	var lo := PackedVector2Array()
-	var gap := 6.0 + smirk * 24.0
+	var gap := 8.0 + smirk * 50.0
 	for i in N:
 		var u := lerpf(-1.0, 1.0, float(i) / float(N - 1))
 		var y := _mouth_y(u, my, smirk)
 		up.append(Vector2(u * W, y))
 		lo.append(Vector2(u * W, y + gap * pow(maxf(1.0 - u * u, 0.0), 0.6)))
-	# lower lip mass
-	var lipcol := _shade(Vector2(0, my + 20), Vector2(0, 1), BASE, 1.2)
-	var jaw := PackedVector2Array()
-	for p in lo:
-		jaw.append(p)
-	for i in range(N - 1, -1, -1):
-		var u := lerpf(-1.0, 1.0, float(i) / float(N - 1))
-		jaw.append(Vector2(u * (W - 10.0), my + 48.0 + 26.0 * (1.0 - u * u) + gap * 0.5))
-	_lit_poly(ci, jaw, BASE, 1.1)
-	# interior
+	var li := minf(lit, 1.2)
+	# shadow of the lower jaw below the cut, and the pulled-back cheeks around the corners
+	var cav := clampf(0.25 + smirk * 0.75, 0.0, 1.0)
+	_halo(ci, Vector2(0, my + 6.0 - smirk * 8.0), Vector2(W * 1.12, 62.0 + smirk * 26.0), Color(0, 0, 0), 0.62 * cav, 10)
+	_halo(ci, Vector2(0, my + 30.0), Vector2(W * 0.8, 40.0), Color(0, 0, 0), 0.3 * cav, 6)
+	# interior: black throat, ember glow rising from within
 	var inside := PackedVector2Array()
-	for p in up:
-		inside.append(p)
+	var icols := PackedColorArray()
+	var gl := mouth_glow
+	for i in N:
+		inside.append(up[i])
+		icols.append(Color(0.004, 0.0, 0.0, 1.0))
 	for i in range(N - 1, -1, -1):
 		inside.append(lo[i])
-	var ic := Color(0.004, 0.0, 0.0) + Color(1.6, 0.30, 0.04) * (mouth_glow * 0.9)
-	ic.a = 1.0
-	ci.draw_colored_polygon(inside, ic)
-	# teeth: upper row small, lower tusks
-	for k in range(-4, 5):
-		var u := float(k) / 4.6
-		var x := u * W * 0.9
-		var y := _mouth_y(u * 0.9, my, smirk)
-		var l := 11.0 + 7.0 * absf(sin(k * 2.3))
-		var tc := _shade(Vector2(x, y + 6), Vector2(0, 1), Color(0.07, 0.07, 0.08), 1.8) + Color(1.4, 0.5, 0.15, 0.0) * (mouth_glow * 0.55)
-		ci.draw_colored_polygon(PackedVector2Array([Vector2(x - 10, y), Vector2(x + 10, y), Vector2(x + 1.5 * sin(k), y + l)]), tc)
+		var u := lerpf(-1.0, 1.0, float(i) / float(N - 1))
+		var c := Color(0.004, 0.0, 0.0, 1.0) + Color(1.5, 0.22, 0.03) * (gl * 0.38 * (1.0 - u * u * 0.7))
+		c.a = 1.0
+		icols.append(c)
+	# strips so the gradient follows the mouth curve
+	for i in N - 1:
+		var j := 2 * N - 1 - i
+		ci.draw_polygon(PackedVector2Array([inside[i], inside[i + 1], inside[j - 1], inside[j]]),
+			PackedColorArray([icols[i], icols[i + 1], icols[j - 1], icols[j]]))
+	# tongue
+	if smirk > 0.15:
+		var tg := PackedVector2Array()
+		for i in 9:
+			var u := lerpf(-0.45, 0.45, float(i) / 8.0)
+			var yl := _mouth_y(u, my, smirk) + gap * pow(1.0 - u * u, 0.6)
+			tg.append(Vector2(u * W, yl + 1.0))
+		for i in range(8, -1, -1):
+			var u := lerpf(-0.45, 0.45, float(i) / 8.0)
+			var yl := _mouth_y(u, my, smirk) + gap * pow(1.0 - u * u, 0.6)
+			tg.append(Vector2(u * W * 0.9, yl - gap * 0.38 * (1.0 - u * u) * smoothstep(0.15, 0.7, smirk)))
+		ci.draw_colored_polygon(tg, Color(0.10, 0.012, 0.012) + Color(1.0, 0.16, 0.03) * (gl * 0.35))
+	# lower teeth (rising), then upper (hanging), tusks last. [u, length, width, bend, chip]
+	var fit := 0.55 + 0.45 * clampf(gap / 40.0, 0.0, 1.0)
+	var lower_t := [[-0.82, 11.0, 15.0, 2.0, 0.0], [-0.68, 16.0, 18.0, -2.0, 0.0], [-0.36, 14.0, 19.0, 3.0, 0.0], [-0.20, 20.0, 20.0, 0.0, 0.4],
+		[-0.04, 13.0, 21.0, -2.0, 0.0], [0.12, 18.0, 20.0, 2.0, 0.0], [0.28, 11.0, 18.0, 4.0, 0.0], [0.70, 15.0, 17.0, -2.0, 0.0], [0.84, 10.0, 13.0, 2.0, 0.0]]
+	for tt in lower_t:
+		var u: float = tt[0]
+		var yl := _mouth_y(u, my, smirk) + gap * pow(1.0 - u * u, 0.6)
+		var sl := (_mouth_y(u + 0.02, my, smirk) + gap * pow(1.0 - (u + 0.02) * (u + 0.02), 0.6) - _mouth_y(u - 0.02, my, smirk) - gap * pow(1.0 - (u - 0.02) * (u - 0.02), 0.6)) / (0.04 * W)
+		_tooth(ci, Vector2(u * W, yl + 2.0), Vector2(sl, -1.0).normalized(), float(tt[1]) * fit, tt[2], tt[3], tt[4])
+	var upper_t := [[-0.88, 12.0, 15.0, 3.0, 0.0], [-0.74, 19.0, 20.0, -3.0, 0.0], [-0.60, 31.0, 20.0, -5.0, 0.0], [-0.44, 16.0, 21.0, 2.0, 0.45],
+		[-0.28, 21.0, 23.0, 0.0, 0.0], [-0.10, 17.0, 22.0, 3.0, 0.0], [0.08, 24.0, 23.0, -2.0, 0.0], [0.40, 17.0, 21.0, 2.0, 0.0],
+		[0.56, 36.0, 21.0, 5.0, 0.0], [0.72, 19.0, 19.0, -2.0, 0.0], [0.87, 12.0, 14.0, 3.0, 0.0]]
+	for tt in upper_t:
+		var u: float = tt[0]
+		var yu := _mouth_y(u, my, smirk)
+		var su := (_mouth_y(u + 0.02, my, smirk) - _mouth_y(u - 0.02, my, smirk)) / (0.04 * W)
+		_tooth(ci, Vector2(u * W, yu - 2.0), Vector2(-su, 1.0).normalized(), float(tt[1]) * fit, tt[2], tt[3], tt[4])
 	for s: float in [-1.0, 1.0]:
-		var ux := s * 0.56
-		var x := ux * W
+		var ux := s * 0.50
 		var yl := _mouth_y(ux, my, smirk) + gap * pow(1.0 - ux * ux, 0.6)
-		var h := 46.0 + smirk * 10.0
-		var tc := _shade(Vector2(x, yl - 20), Vector2(0, -1).rotated(s * 0.3), Color(0.06, 0.06, 0.07), 1.7)
-		ci.draw_colored_polygon(PackedVector2Array([Vector2(x - 12, yl + 2), Vector2(x + 12, yl + 2), Vector2(x + s * 8.0, yl - h)]), tc)
-	for i in 8:
-		var x := lerpf(-60.0, 60.0, float(i) / 7.0)
-		var yl := _mouth_y(x / W, my, smirk) + gap * pow(1.0 - pow(x / W, 2.0), 0.6)
-		ci.draw_colored_polygon(PackedVector2Array([Vector2(x - 7, yl + 1), Vector2(x + 7, yl + 1), Vector2(x, yl - 9.0)]), _shade(Vector2(x, yl), Vector2(0, -1), Color(0.04, 0.04, 0.05), 1.3))
-	# lips as thick lit lines
-	ci.draw_polyline(up, Color(0, 0, 0, 0.9), 7.0)
-	ci.draw_polyline(up, lipcol, 2.0)
-	ci.draw_polyline(lo, Color(0, 0, 0, 0.8), 5.0)
-	# corner creases
+		var h := 56.0 + smirk * 20.0
+		_tooth(ci, Vector2(ux * W, yl + 3.0), Vector2(s * 0.12, -1.0).normalized(), h, 24.0, s * 9.0, 0.0)
+	# gum shadow along the upper edge, then the cut itself: no lips, a raw beveled slit
+	ci.draw_polyline(up, Color(0.12, 0.01, 0.01, 0.55), 5.0)
+	ci.draw_polyline(up, Color(0, 0, 0, 0.92), 3.5)
+	var hl := _shade(Vector2(0, my - 10), Vector2(0, -1), Color(0.03, 0.03, 0.04), 1.2)
+	hl.a = 0.55
+	var upl := PackedVector2Array()
+	for p in up:
+		upl.append(p + Vector2(0, -3.0))
+	ci.draw_polyline(upl, hl, 1.4)
+	ci.draw_polyline(lo, Color(0, 0, 0, 0.85), 3.0)
+	var lol := PackedVector2Array()
+	for p in lo:
+		lol.append(p + Vector2(0, 3.4))
+	var lc := Color(1.0, 0.36, 0.08, 0.20 * li)
+	ci.draw_polyline(lol, lc, 1.2)
+	# corner creases dig in as the grin grows
 	for s: float in [-1.0, 1.0]:
 		var c := up[N - 1] if s > 0.0 else up[0]
-		var cr := PackedVector2Array([c, c + Vector2(s * 14, -10 - smirk * 14), c + Vector2(s * 18, -26 - smirk * 24)])
-		ci.draw_polyline(cr, Color(0, 0, 0, 0.8), 3.0)
+		var d := (0.6 + 0.8 * smirk)
+		for k in 3:
+			var o := Vector2(s * (3.0 + k * 6.0), -2.0 - k * 7.0 * d)
+			var cr := PackedVector2Array([c + Vector2(s * 4.0, 2.0) + o, c + Vector2(s * 16.0, -10.0 * d) + o, c + Vector2(s * 22.0, -28.0 * d) + o * 0.5])
+			ci.draw_polyline(cr, Color(0, 0, 0, 0.75), 2.6 - k * 0.5)
+			var cr2 := PackedVector2Array()
+			for p in cr:
+				cr2.append(p + Vector2(s * 1.5, 2.0))
+			ci.draw_polyline(cr2, Color(hl.r, hl.g, hl.b, 0.35), 1.0)
 
 
-# --- cracks ------------------------------------------------------------------------------------
+func _draw_dyn() -> void:
+	# draws in the camera's world space (the caller's transform lives on the parent node)
+	for s: float in [-1.0, 1.0]:
+		_draw_eye(_dyn, s)
+	_draw_mouth(_dyn)
+
+
+# --- cracks: the dark side is baked into the shader (goblin_bust.gdshader) --------------------------
 func _partial(pts: PackedVector2Array, p: float) -> PackedVector2Array:
 	var n := pts.size() - 1
 	var f := p * n
@@ -429,27 +659,16 @@ func _partial(pts: PackedVector2Array, p: float) -> PackedVector2Array:
 	return out
 
 
-func draw_cracks_dark(ci: CanvasItem) -> void:
-	for c in cracks:
-		var p := clampf((t - c.t0) / c.dur, 0.0, 1.0)
-		if p <= 0.0:
-			continue
-		var pp := _partial(c.pts, p)
-		if pp.size() < 2:
-			continue
-		ci.draw_polyline(pp, Color(0, 0, 0, 0.95), c.w + 1.5)
+func draw_cracks_dark(_ci: CanvasItem) -> void:
+	pass
 
 
 func draw_glow(ci: CanvasItem) -> void:
-	# glass lit from within: stacked soft ellipses
+	# thin hot cores and burning tips (the soft subsurface glow comes from the shader)
 	if hot > 0.01:
-		for i in 7:
-			var f := 1.0 - float(i) / 7.0
-			var e := Color(1.0, 0.30, 0.05, hot * 0.003)
-			_ellipse(ci, Vector2(0, -20), Vector2(200, 250) * (0.35 + 0.65 * f), e)
 		for i in 5:
 			var f := 1.0 - float(i) / 5.0
-			_ellipse(ci, Vector2(0, 420), Vector2(380, 230) * (0.3 + 0.7 * f), Color(1.0, 0.25, 0.04, hot * 0.005))
+			_ellipse(ci, Vector2(0, 420), Vector2(380, 230) * (0.3 + 0.7 * f), Color(1.0, 0.25, 0.04, hot * 0.003))
 	for c in cracks:
 		var age := t - float(c.t0)
 		var p := clampf(age / c.dur, 0.0, 1.0)
@@ -461,33 +680,39 @@ func draw_glow(ci: CanvasItem) -> void:
 		var b := (0.30 + 0.70 * smoothstep(0.0, 2.5, age)) * (0.30 + 0.70 * crack_heat) * (0.85 + 0.15 * sin(t * 2.1 + c.ph))
 		b += exp(-age * 2.2) * 1.6
 		var w: float = c.w
-		ci.draw_polyline(pp, Color(1.0, 0.28, 0.04, 0.012 * b), w * 8.0)
-		ci.draw_polyline(pp, Color(1.2, 0.42, 0.07, 0.05 * b), w * 3.2)
-		ci.draw_polyline(pp, Color(3.0, 1.7, 0.5, 0.85 * minf(b, 1.5)), w * 0.9)
-		# the tip burns brightest
+		if smirk > 0.02 or eye > 0.02:
+			for i in pp.size() - 1:
+				var k := _calm((pp[i] + pp[i + 1]) * 0.5)
+				ci.draw_line(pp[i], pp[i + 1], Color(1.0, 0.28, 0.04, 0.010 * b * k), w * 6.0)
+				ci.draw_line(pp[i], pp[i + 1], Color(3.0, 1.7, 0.5, 0.12 * minf(b, 1.5) * k), w * 0.4)
+		else:
+			ci.draw_polyline(pp, Color(1.0, 0.28, 0.04, 0.010 * b), w * 6.0)
+			ci.draw_polyline(pp, Color(3.0, 1.7, 0.5, 0.12 * minf(b, 1.5)), w * 0.4)
 		if p < 1.0:
 			var tip := pp[pp.size() - 1]
 			ci.draw_circle(tip, 9.0, Color(1.5, 0.7, 0.2, 0.30))
 			ci.draw_circle(tip, 3.5, Color(3.0, 2.2, 1.0, 0.9))
-	# eye halos
+	# eye halos and a flare streak
 	if eye > 0.02:
 		for s: float in [-1.0, 1.0]:
 			var E := Vector2(s * 92.0, -46.0)
 			for hk in 10:
 				var hf := float(hk) / 9.0
-				ci.draw_circle(E, lerpf(150.0, 40.0, hf), Color(1.2, 0.45, 0.08, (0.006 + 0.010 * hf) * eye))
+				ci.draw_circle(E, lerpf(150.0, 40.0, hf), Color(1.2, 0.45, 0.08, (0.005 + 0.009 * hf) * eye))
+			ci.draw_line(E + Vector2(-190, 0), E + Vector2(190, 0), Color(1.0, 0.35, 0.08, 0.05 * eye), 5.0)
+			ci.draw_line(E + Vector2(-110, 0), E + Vector2(110, 0), Color(2.0, 0.9, 0.35, 0.10 * eye), 2.0)
 	if mouth_glow > 0.01:
-		var mc := Vector2(0, 170)
-		_ellipse(ci, mc, Vector2(190, 90), Color(1.0, 0.25, 0.04, 0.03 * mouth_glow))
-		_ellipse(ci, mc, Vector2(120, 45), Color(1.2, 0.35, 0.05, 0.05 * mouth_glow))
-	# the coin pendant and ear coin glow with the gold in the glass
+		var mc := Vector2(0, 176)
+		_ellipse(ci, mc, Vector2(190, 90), Color(1.0, 0.25, 0.04, 0.004 * mouth_glow))
+		_ellipse(ci, mc, Vector2(120, 45), Color(1.2, 0.35, 0.05, 0.006 * mouth_glow))
+	# the coin pendant and ear ring glow with the gold in the glass
 	var gl := smoothstep(0.02, 0.6, hot) * (0.7 + 0.3 * sin(t * 1.7))
 	if gl > 0.01:
 		ci.draw_circle(Vector2(0, 396), 80.0, Color(1.0, 0.55, 0.12, 0.05 * gl))
 		ci.draw_arc(Vector2(0, 396), 38.0, 0.0, TAU, 28, Color(2.6, 1.5, 0.4, 0.8 * gl), 2.5)
 		ci.draw_polyline(PackedVector2Array([Vector2(-16, 410), Vector2(-16, 384), Vector2(0, 396), Vector2(16, 384), Vector2(16, 410)]), Color(2.6, 1.5, 0.4, 0.8 * gl), 2.5)
-		ci.draw_arc(Vector2(-222, 62), 20.0, 0.0, TAU, 20, Color(2.6, 1.5, 0.4, 0.7 * gl), 3.0)
-		ci.draw_circle(Vector2(-222, 62), 40.0, Color(1.0, 0.55, 0.12, 0.04 * gl))
+		ci.draw_arc(Vector2(-240, 98), 21.0, 0.0, TAU, 24, Color(2.6, 1.5, 0.4, 0.7 * gl), 2.5)
+		ci.draw_circle(Vector2(-240, 98), 40.0, Color(1.0, 0.55, 0.12, 0.04 * gl))
 
 
 func _ellipse(ci: CanvasItem, c: Vector2, r: Vector2, col: Color) -> void:
@@ -739,3 +964,34 @@ func _mem_fall(ci: CanvasItem, p: float, a: float, gold: Color, ink: Color) -> v
 			var an := i * 1.05 + rot * 0.5
 			ci.draw_line(c, c + Vector2.from_angle(an) * (50.0 + 20.0 * sin(i * 2.0)), Color(3.0, 1.8, 0.6, ga * 0.9), 1.6)
 		_star(ci, c + Vector2(12, -50), 22.0 * ga, Color(3.0, 2.8, 2.4, ga))
+
+
+## 1 = crack light at full, falling to ~0.15 where the smirk / the open eyes need to read
+func _calm(p: Vector2) -> float:
+	var dm := ((p - Vector2(0.0, 176.0)) / Vector2(200.0, 86.0)).length()
+	var de := ((Vector2(absf(p.x), p.y) - Vector2(92.0, -46.0)) / Vector2(78.0, 44.0)).length()
+	return (1.0 - smirk * 0.85 * smoothstep(1.0, 0.45, dm)) * (1.0 - eye * 0.8 * smoothstep(1.0, 0.5, de))
+
+
+## tileable noise, r = fine, g = mid, b = low frequency
+func _make_noise() -> ImageTexture:
+	var n := 256
+	var chans: Array = []
+	var freqs := [0.12, 0.05, 0.02]
+	for k in 3:
+		var nz := FastNoiseLite.new()
+		nz.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+		nz.fractal_type = FastNoiseLite.FRACTAL_FBM
+		nz.fractal_octaves = 3
+		nz.frequency = freqs[k]
+		nz.seed = 777 + k * 31
+		chans.append(nz.get_seamless_image(n, n, false, false, 0.15, true).get_data())
+	var data := PackedByteArray()
+	data.resize(n * n * 3)
+	for i in n * n:
+		data[i * 3] = chans[0][i]
+		data[i * 3 + 1] = chans[1][i]
+		data[i * 3 + 2] = chans[2][i]
+	var img := Image.create_from_data(n, n, false, Image.FORMAT_RGB8, data)
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
