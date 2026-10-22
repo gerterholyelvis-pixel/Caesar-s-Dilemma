@@ -30,7 +30,7 @@ func _ready() -> void:
 		tscale = 0.25
 	Hub.boot()
 	Hub.audio(get_tree())
-	Hub.theme("limbo")
+	Hub.theme("shrine")   # mysterious: odd 5/4 meter, glass shimmer, unresolved harmony, no drums
 	var sz := get_viewport_rect().size
 	ground_y = sz.y * 0.80
 

@@ -54,6 +54,8 @@ static func play(parent: Node) -> void:
 	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(c)
 	await c.run()
+	Hub.theme("")
+	Hub.tension(0.0)
 	if is_instance_valid(c):
 		c.queue_free()
 
@@ -61,6 +63,14 @@ static func play(parent: Node) -> void:
 func run() -> void:
 	var t0 := debug_t0
 	time = t0
+	# dramatic score: the "boss" theme (tritone + minor-second drone, driving polyrhythm) swells with the fall
+	# and is faded out for the last 2 s so the obsidian deep starts in silence
+	Hub.audio(get_tree())
+	Hub.theme("boss")
+	Hub.tension(0.25)
+	var mt := create_tween()
+	mt.tween_method(Hub.tension, 0.25, 1.0, (DUR - t0) * 0.8)
+	get_tree().create_timer(maxf(DUR - t0 - 2.0, 0.1)).timeout.connect(func() -> void: Hub.theme(""))
 	_cs = Cutscene.new().bind(self)
 	_cs.tween(self, "time", DUR, DUR - t0, 0.0, Tween.TRANS_LINEAR, Tween.EASE_IN_OUT)
 	_cs.finished.connect(_stop_audio, CONNECT_ONE_SHOT)
@@ -379,7 +389,7 @@ func _process(_d: float) -> void:
 		if st != null and not _job.cancel and is_inside_tree():
 			_player = AudioStreamPlayer.new()
 			_player.stream = st
-			_player.volume_db = -3.0
+			_player.volume_db = -8.0
 			add_child(_player)
 			_player.play(clampf(time, 0.0, DUR - 0.1))
 

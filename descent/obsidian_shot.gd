@@ -9,6 +9,7 @@ func _ready() -> void:
 	var s: Control = load("res://descent/obsidian_scene.tscn").instantiate()
 	s.parallax_enabled = false
 	add_child(s)
+	s.size = get_viewport().get_visible_rect().size
 	s.set_process(false)
 	s._t = t
 	for i in 4:
