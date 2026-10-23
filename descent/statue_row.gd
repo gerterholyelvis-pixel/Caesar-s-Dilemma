@@ -62,6 +62,9 @@ func _open_goblin() -> void:
 	if ResourceLoader.exists("res://descent/goblin_cinematic.gd"):
 		var s: GDScript = load("res://descent/goblin_cinematic.gd")
 		await s.call("play", get_parent())
+	if ResourceLoader.exists("res://act1/chamber.tscn"):
+		get_tree().change_scene_to_file("res://act1/chamber.tscn")   # ACT 1 begins when the goblin film ends
+		return
 	_busy = false
 
 

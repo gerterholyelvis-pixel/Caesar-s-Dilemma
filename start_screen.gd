@@ -102,6 +102,12 @@ func _ready() -> void:
 	fall_btn.offset_right = -180.0
 	fall_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://descent/fall_demo.tscn"))
 	add_child(fall_btn)
+	var act_btn: Button = skip.duplicate()
+	act_btn.text = "skip to act 1"
+	act_btn.offset_left = -500.0
+	act_btn.offset_right = -350.0
+	act_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://act1/chamber.tscn"))
+	add_child(act_btn)
 	# test hook: `godot --path . -- --autostart` triggers the Start sequence by itself
 	if "--autostart" in OS.get_cmdline_user_args():
 		get_tree().create_timer(2.0).timeout.connect(_on_start)
